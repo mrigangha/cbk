@@ -29,7 +29,27 @@ func NewJWT(email string) string {
 	return tokenString
 
 }
+func NewJWTRefresh(email string) string {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: .env file not loaded")
+	}
 
+	claims := jwt.MapClaims{
+		"email": email,
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(30 * 24 * time.Hour).Unix(), // 30 days
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return tokenString
+}
 func DecodeJWT(tokenString string) (jwt.MapClaims, error) {
 	if err := godotenv.Load(); err != nil {
 		// Ignore if .env is already loaded elsewhere

@@ -2,16 +2,12 @@ package core
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
-	"os"
 	"time"
-
-	"github.com/mrigangha/cbk/internals/ai/cloud"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-
+	"github.com/go-chi/cors"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,7 +24,33 @@ func NewApi() *Api {
 	}
 
 	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins: []string{
+			"http://localhost:5173", // SvelteKit dev server
+		},
 
+		AllowedMethods: []string{
+			"GET",
+			"POST",
+			"PUT",
+			"DELETE",
+			"OPTIONS",
+		},
+
+		AllowedHeaders: []string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+		},
+
+		ExposedHeaders: []string{
+			"Set-Cookie",
+		},
+
+		AllowCredentials: true,
+
+		MaxAge: 300,
+	}))
 	// Middleware for logging, recovery, and timeouts
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -40,50 +62,50 @@ func NewApi() *Api {
 	r.Get("/health", api.Health)
 
 	// URL parameter extraction
-	r.Get("/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
-		userID := chi.URLParam(r, "userID")
-		json.NewEncoder(w).Encode(map[string]string{"user_id": userID})
+	r.Route("/auth", func(r chi.Router) {
+		r.Post("/register", api.Register)
+		r.Post("/login", api.Login)
+		r.Post("/refresh", api.Refresh)
+		r.With(AuthMiddleware).Get("/meta/accounts", api.GetConnectedMetaAccounts)
 	})
 
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Get("/me", api.Me)
+	})
 	// Sub-router grouping
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"status": "OK"}`))
 		})
 	})
-	r.With(AuthMiddleware).Get("/me", func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserContextKey).(map[string]any)
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
 
-		json.NewEncoder(w).Encode(user)
+	r.Post("/auth/meta/callback", api.MetaCallback)
+	r.Get("/auth/meta/credential", api.GetMetaCredential)
+	r.With(AuthMiddleware).Delete("/auth/meta/accounts", api.DeleteConnectedMetaAccounts)
+	r.With(AuthMiddleware).Get("/meta/campaigns", api.GetCampaigns)
+	r.With(AuthMiddleware).Get("/meta/campaign/details", api.GetCampaignDetails)
+
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Post("/providers", api.CreateProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Post("/ai/generate", api.Generate)
 	})
 
-	r.Route("/auth", func(r chi.Router) {
-		r.Post("/login", func(w http.ResponseWriter, r *http.Request) {
-			token := NewJWT("john@example.com")
-
-			json.NewEncoder(w).Encode(map[string]string{
-				"token": token,
-				"type":  "Bearer",
-			})
-		})
-	})
 	api.db = db
 	api.router = r
 	return &api
 }
 
 func (a *Api) Health(w http.ResponseWriter, r *http.Request) {
-	p := cloud.NewProvider(os.Getenv("GEMINI_API_KEY"), "gemini-3.5-flash", "https://generativelanguage.googleapis.com/v1beta")
-	res, err := p.GenerateText("Say hello")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Write([]byte(res))
+
+	w.Write([]byte("OK"))
 }
 
 func (a *Api) Router() *chi.Mux {
