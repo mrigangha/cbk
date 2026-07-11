@@ -71,6 +71,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -78,5 +79,8 @@ func main() {
 	api := core.NewApi()
 	defer api.Cleanup()
 
-	http.ListenAndServe(":3000", api.Router())
+	err = http.ListenAndServe(":3000", api.Router())
+	if err != nil {
+		log.Fatal(err)
+	}
 }

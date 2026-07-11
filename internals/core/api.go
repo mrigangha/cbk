@@ -86,6 +86,9 @@ func NewApi() *Api {
 	r.With(AuthMiddleware).Delete("/auth/meta/accounts", api.DeleteConnectedMetaAccounts)
 	r.With(AuthMiddleware).Get("/meta/campaigns", api.GetCampaigns)
 	r.With(AuthMiddleware).Get("/meta/campaign/details", api.GetCampaignDetails)
+	r.With(AuthMiddleware).Get("/meta/campaign/insights", api.GetCampaignInsights)
+	r.With(AuthMiddleware).Get("/meta/adsets", api.GetAdSets)
+	r.With(AuthMiddleware).Get("/meta/ads", api.GetAds)
 
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware)

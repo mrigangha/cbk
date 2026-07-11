@@ -178,3 +178,16 @@ func (a *Api) Refresh(w http.ResponseWriter, r *http.Request) {
 		"expires_in":   3600,
 	})
 }
+
+func (a *Api) Logout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false, // localhost only
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	w.WriteHeader(http.StatusOK)
+}

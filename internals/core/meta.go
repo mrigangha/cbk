@@ -9,6 +9,201 @@ import (
 	"os"
 )
 
+type AdSetResponse struct {
+	Data []AdSet `json:"data"`
+}
+
+type AdSet struct {
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
+	Status           string      `json:"status"`
+	EffectiveStatus  string      `json:"effective_status"`
+	DailyBudget      string      `json:"daily_budget"`
+	LifetimeBudget   string      `json:"lifetime_budget"`
+	OptimizationGoal string      `json:"optimization_goal"`
+	BillingEvent     string      `json:"billing_event"`
+	BidStrategy      string      `json:"bid_strategy"`
+	StartTime        string      `json:"start_time"`
+	EndTime          string      `json:"end_time"`
+	Targeting        interface{} `json:"targeting"`
+}
+
+func (a *Api) GetAdSets(w http.ResponseWriter, r *http.Request) {
+	user := a.GetUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	adAccountID := r.URL.Query().Get("ad_account_id")
+	if adAccountID == "" {
+		http.Error(w, "missing ad_account_id", http.StatusBadRequest)
+		return
+	}
+
+	campaignID := r.URL.Query().Get("ad_campaign_id")
+	if campaignID == "" {
+		http.Error(w, "missing campaign_id", http.StatusBadRequest)
+		return
+	}
+
+	var accessToken string
+
+	err := a.db.QueryRow(`
+		SELECT access_token
+		FROM meta_ads_accounts
+		WHERE user_id = ?
+		AND ad_account_id = ?
+	`,
+		user.ID,
+		adAccountID,
+	).Scan(&accessToken)
+
+	if err != nil {
+		http.Error(w, "access token not found", http.StatusInternalServerError)
+		return
+	}
+
+	graphURL := fmt.Sprintf(
+		"https://graph.facebook.com/v23.0/%s/adsets?fields=id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,bid_strategy,targeting,start_time,end_time",
+		campaignID,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, graphURL, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "failed to fetch ad sets from Meta",
+		})
+		return
+	}
+
+	var result AdSetResponse
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+type CampaignInsightsResponse struct {
+	Data []CampaignInsight `json:"data"`
+}
+
+type CampaignInsight struct {
+	Spend       string `json:"spend"`
+	Impressions string `json:"impressions"`
+	Reach       string `json:"reach"`
+	Clicks      string `json:"clicks"`
+	CTR         string `json:"ctr"`
+	CPC         string `json:"cpc"`
+	CPM         string `json:"cpm"`
+	Frequency   string `json:"frequency"`
+
+	Actions           []Action `json:"actions"`
+	CostPerActionType []Action `json:"cost_per_action_type"`
+
+	PurchaseROAS []ROAS `json:"purchase_roas,omitempty"`
+}
+
+type Action struct {
+	ActionType string `json:"action_type"`
+	Value      string `json:"value"`
+}
+
+type ROAS struct {
+	ActionType string `json:"action_type"`
+	Value      string `json:"value"`
+}
+
+func (a *Api) GetCampaignInsights(w http.ResponseWriter, r *http.Request) {
+	user := a.GetUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	adAccountID := r.URL.Query().Get("ad_account_id")
+	if adAccountID == "" {
+		http.Error(w, "missing ad_account_id", http.StatusBadRequest)
+		return
+	}
+
+	campaignID := r.URL.Query().Get("ad_campaign_id")
+	if campaignID == "" {
+		http.Error(w, "missing campaign_id", http.StatusBadRequest)
+		return
+	}
+
+	var accessToken string
+
+	err := a.db.QueryRow(`
+		SELECT access_token
+		FROM meta_ads_accounts
+		WHERE user_id = ? AND ad_account_id = ?
+	`,
+		user.ID,
+		adAccountID,
+	).Scan(&accessToken)
+
+	if err != nil {
+		http.Error(w, "access token not found", http.StatusInternalServerError)
+		return
+	}
+
+	graphURL := fmt.Sprintf(
+		"https://graph.facebook.com/v23.0/%s/insights?fields=spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,actions,cost_per_action_type,purchase_roas",
+		campaignID,
+	)
+
+	req, err := http.NewRequest(http.MethodGet, graphURL, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 func (a *Api) MetaLogin(w http.ResponseWriter, r *http.Request) {
 
 	var (
@@ -333,4 +528,88 @@ func (a *Api) DeleteConnectedMetaAccounts(w http.ResponseWriter, r *http.Request
 		"success": true,
 		"message": "All connected Meta ad accounts deleted.",
 	})
+}
+
+type AdsResponse struct {
+	Data []Ad `json:"data"`
+}
+
+type Ad struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Status           string   `json:"status"`
+	EffectiveStatus  string   `json:"effective_status"`
+	ConfiguredStatus string   `json:"configured_status"`
+	Creative         Creative `json:"creative"`
+}
+
+type Creative struct {
+	ID string `json:"id"`
+}
+
+func (a *Api) GetAds(w http.ResponseWriter, r *http.Request) {
+	user := a.GetUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	adAccountID := r.URL.Query().Get("ad_account_id")
+	if adAccountID == "" {
+		http.Error(w, "missing ad_account_id", http.StatusBadRequest)
+		return
+	}
+
+	adSetID := r.URL.Query().Get("ad_set_id")
+	if adSetID == "" {
+		http.Error(w, "missing ad_set_id", http.StatusBadRequest)
+		return
+	}
+
+	var accessToken string
+
+	err := a.db.QueryRow(`
+		SELECT access_token
+		FROM meta_ads_accounts
+		WHERE user_id = ? AND ad_account_id = ?
+	`,
+		user.ID,
+		adAccountID,
+	).Scan(&accessToken)
+
+	if err != nil {
+		http.Error(w, "access token not found", http.StatusInternalServerError)
+		return
+	}
+
+	url := fmt.Sprintf(
+		"https://graph.facebook.com/v23.0/%s/ads?fields=id,name,status,effective_status,configured_status,creative",
+		adSetID,
+	)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, string(body), resp.StatusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
 }
