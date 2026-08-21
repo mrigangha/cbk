@@ -61,8 +61,6 @@ func (p *Provider) GenerateText(prompt string) (string, error) {
 		return "", err
 	}
 
-	fmt.Println(string(body))
-
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
 	}
@@ -127,7 +125,6 @@ func (p *Provider) Chat(
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(string(respBody))
 
 	if httpResp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(

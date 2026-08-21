@@ -86,6 +86,15 @@ func NewApi() *Api {
 	})
 
 	r.With(AuthMiddleware).Post("/test", api.RunAgent)
+
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Get("/agent/sessions", api.ListAgentSessions)
+		r.Post("/agent/sessions", api.CreateAgentSession)
+		r.Get("/agent/sessions/{sessionID}/messages", api.GetAgentSessionMessages)
+		r.Delete("/agent/sessions/{sessionID}", api.DeleteAgentSession)
+	})
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)
 	r.With(AuthMiddleware).Delete("/auth/meta/accounts", api.DeleteConnectedMetaAccounts)
@@ -99,6 +108,7 @@ func NewApi() *Api {
 		r.Use(AuthMiddleware)
 
 		r.Post("/providers", api.CreateProvider)
+		r.Get("/providers", api.ListProviders)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware)

@@ -13,7 +13,3 @@ func NewProvider(apiKey, model, baseURL string) *Provider {
 		baseURL: baseURL,
 	}
 }
-
-func (p *Provider) AddToDb() {
-
-}

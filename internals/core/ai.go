@@ -13,6 +13,53 @@ type CreateProviderRequest struct {
 	APIKey    string `json:"api_key"`
 }
 
+type ProviderInfo struct {
+	ID        int64  `json:"id"`
+	ModelName string `json:"model_name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (a *Api) ListProviders(w http.ResponseWriter, r *http.Request) {
+	user := a.GetUser(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	rows, err := a.db.Query(`
+		SELECT id, provider_name, created_at
+		FROM providers
+		WHERE user_id = ?
+		ORDER BY created_at DESC
+	`, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	providers := make([]ProviderInfo, 0)
+
+	for rows.Next() {
+		var p ProviderInfo
+		if err := rows.Scan(&p.ID, &p.ModelName, &p.CreatedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		providers = append(providers, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"providers": providers,
+	})
+}
+
 func (a *Api) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	var req CreateProviderRequest
 

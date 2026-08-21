@@ -13,17 +13,20 @@ type AgentRequest struct {
 	ModelName string          `json:"model_name"`
 	Prompt    string          `json:"prompt"`
 	Messages  []tools.Message `json:"messages,omitempty"`
+	SessionID int64           `json:"session_id,omitempty"`
 }
 
 type AgentStep struct {
 	Tool   string         `json:"tool"`
 	Args   map[string]any `json:"args"`
-	Result any            `json:"result"`
+	Result any            `json:"result,omitempty"`
+	Error  string         `json:"error,omitempty"`
 }
 
 type AgentResponse struct {
-	Response string      `json:"response"`
-	Steps    []AgentStep `json:"steps"`
+	SessionID int64       `json:"session_id"`
+	Response  string      `json:"response"`
+	Steps     []AgentStep `json:"steps"`
 }
 
 func (a *Api) RunAgent(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +138,47 @@ func (a *Api) RunAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve or create the chat session for history.
+	sessionID := agentReq.SessionID
+
+	if sessionID > 0 {
+		var ownerID int64
+		err = a.db.QueryRow(`
+			SELECT user_id FROM agent_sessions WHERE id = ?
+		`, sessionID).Scan(&ownerID)
+
+		if err != nil || ownerID != user.ID {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	} else {
+		title := agentReq.Prompt
+		if len(title) > 60 {
+			title = title[:60] + "..."
+		}
+
+		res, err := a.db.Exec(`
+			INSERT INTO agent_sessions (user_id, title)
+			VALUES (?, ?)
+		`, user.ID, title)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		sessionID, _ = res.LastInsertId()
+	}
+
+	// Persist the user prompt.
+	_, err = a.db.Exec(`
+		INSERT INTO agent_messages (session_id, role, content)
+		VALUES (?, 'user', ?)
+	`, sessionID, agentReq.Prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	// Create tool handler
 	handler := tools.NewToolHandler()
 
@@ -176,68 +220,112 @@ func (a *Api) RunAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		part := resp.Candidates[0].Content.Parts[0]
+		parts := resp.Candidates[0].Content.Parts
 
-		// Finished: model returned text
-		if part.FunctionCall == nil {
+		// Collect text and every function call from all parts.
+		var text string
+		calls := make([]*tools.FunctionCall, 0)
+
+		for _, part := range parts {
+			if part.FunctionCall != nil {
+				calls = append(calls, part.FunctionCall)
+			}
+			if part.Text != "" {
+				text += part.Text
+			}
+		}
+
+		// Finished: model answered with text only.
+		if len(calls) == 0 {
+
+			// Persist the assistant response with its tool trace.
+			stepsJSON, _ := json.Marshal(steps)
+
+			_, err = a.db.Exec(`
+				INSERT INTO agent_messages (session_id, role, content, steps, model_name)
+				VALUES (?, 'assistant', ?, ?, ?)
+			`, sessionID, text, string(stepsJSON), agentReq.ModelName)
+			if err == nil {
+				a.db.Exec(`
+					UPDATE agent_sessions
+					SET updated_at = CURRENT_TIMESTAMP
+					WHERE id = ?
+				`, sessionID)
+			}
 
 			json.NewEncoder(w).Encode(AgentResponse{
-				Response: part.Text,
-				Steps:    steps,
+				SessionID: sessionID,
+				Response:  text,
+				Steps:     steps,
 			})
 			return
 		}
 
-		// Execute tool
-		result, err := handler.ExecuteTool(
-			tools.ToolContext{
-				AccessToken: accessToken,
-				AdAccountID: adAccountID,
+		// Echo the full model turn back (preserves thought signatures).
+		modelParts := make([]tools.Part, 0, len(parts))
+
+		for _, part := range parts {
+			modelParts = append(modelParts, tools.Part{
+				Text:             part.Text,
+				FunctionCall:     part.FunctionCall,
+				ThoughtSignature: part.ThoughtSignature,
+			})
+		}
+
+		// Execute every requested tool and collect responses.
+		toolParts := make([]tools.Part, 0, len(calls))
+
+		for _, call := range calls {
+
+			result, toolErr := handler.ExecuteTool(
+				tools.ToolContext{
+					AccessToken: accessToken,
+					AdAccountID: adAccountID,
+				},
+				call.Name,
+				call.Args,
+			)
+
+			payload := map[string]any{}
+
+			if toolErr != nil {
+				// Feed failures back so the model can recover
+				// instead of aborting the whole request.
+				payload["error"] = toolErr.Error()
+			} else {
+				payload["result"] = result
+			}
+
+			step := AgentStep{
+				Tool:   call.Name,
+				Args:   call.Args,
+				Result: result,
+			}
+
+			if toolErr != nil {
+				step.Error = toolErr.Error()
+			}
+
+			steps = append(steps, step)
+
+			toolParts = append(toolParts, tools.Part{
+				FunctionResponse: &tools.FunctionResponse{
+					Name:     call.Name,
+					Response: payload,
+				},
+			})
+		}
+
+		request.Contents = append(request.Contents,
+			tools.Content{
+				Role:  "model",
+				Parts: modelParts,
 			},
-			part.FunctionCall.Name,
-			part.FunctionCall.Args,
+			tools.Content{
+				Role:  "tool",
+				Parts: toolParts,
+			},
 		)
-
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Record the tool call for the frontend trace
-		steps = append(steps, AgentStep{
-			Tool:   part.FunctionCall.Name,
-			Args:   part.FunctionCall.Args,
-			Result: result,
-		})
-
-		// Continue conversation
-		request = tools.GenerateContentRequest{
-			Contents: append(
-				request.Contents,
-				tools.Content{
-					Role: "model",
-					Parts: []tools.Part{
-						{
-							FunctionCall:     part.FunctionCall,
-							ThoughtSignature: part.ThoughtSignature,
-						},
-					},
-				},
-				tools.Content{
-					Role: "tool",
-					Parts: []tools.Part{
-						{
-							FunctionResponse: &tools.FunctionResponse{
-								Name: part.FunctionCall.Name,
-								Response: map[string]any{
-									"result": result,
-								},
-							},
-						},
-					},
-				},
-			),
-		}
 	}
 
 	http.Error(
