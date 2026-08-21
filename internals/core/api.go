@@ -8,16 +8,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/mrigangha/cbk/internals/tools"
 	_ "modernc.org/sqlite"
 )
 
 type Api struct {
-	db     *sql.DB
-	router *chi.Mux
+	db          *sql.DB
+	router      *chi.Mux
+	toolHandler *tools.ToolHandler
 }
 
 func NewApi() *Api {
 	api := Api{}
+	api.toolHandler = tools.NewToolHandler()
 	db, err := sql.Open("sqlite", "app.db")
 	if err != nil {
 		panic(err)
@@ -66,6 +69,7 @@ func NewApi() *Api {
 		r.Post("/register", api.Register)
 		r.Post("/login", api.Login)
 		r.Post("/refresh", api.Refresh)
+		r.Post("/logout", api.Logout)
 		r.With(AuthMiddleware).Get("/meta/accounts", api.GetConnectedMetaAccounts)
 	})
 
@@ -81,6 +85,7 @@ func NewApi() *Api {
 		})
 	})
 
+	r.With(AuthMiddleware).Post("/test", api.RunAgent)
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)
 	r.With(AuthMiddleware).Delete("/auth/meta/accounts", api.DeleteConnectedMetaAccounts)

@@ -43,5 +43,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := migrateV2(db); err != nil {
+		log.Fatal(err)
+	}
+
 	log.Println("Migration completed successfully.")
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/mrigangha/cbk/internals/tools"
 )
 
 type InteractionRequest struct {
@@ -59,11 +61,14 @@ func (p *Provider) GenerateText(prompt string) (string, error) {
 		return "", err
 	}
 
+	fmt.Println(string(body))
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var result InteractionResponse
+
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
@@ -81,4 +86,62 @@ func (p *Provider) GenerateText(prompt string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no model output found in response")
+}
+
+func (p *Provider) Chat(
+	req tools.GenerateContentRequest,
+) (*tools.GenerateContentResponse, error) {
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf(
+		"%s/models/%s:generateContent?key=%s",
+		p.baseURL,
+		p.model,
+		p.apiKey,
+	)
+
+	httpReq, err := http.NewRequest(
+		http.MethodPost,
+		url,
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(string(respBody))
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf(
+			"gemini error (%d): %s",
+			httpResp.StatusCode,
+			string(respBody),
+		)
+	}
+
+	var response tools.GenerateContentResponse
+
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
 }

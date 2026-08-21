@@ -1,20 +1,9 @@
 package main
 
-import (
-	"database/sql"
-	"log"
+import "database/sql"
 
-	_ "modernc.org/sqlite"
-)
-
-func main() {
-	db, err := sql.Open("sqlite", "app.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-
-	_, err = db.Exec(`
+func migrateV2(db *sql.DB) error {
+	_, err := db.Exec(`
 	PRAGMA foreign_keys = ON;
 
 	CREATE TABLE IF NOT EXISTS users (
@@ -73,9 +62,5 @@ func main() {
 	CREATE INDEX IF NOT EXISTS idx_meta_ads_accounts_ad_account_id
 	ON meta_ads_accounts(ad_account_id);
 	`)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Println("Migration completed successfully.")
+	return err
 }

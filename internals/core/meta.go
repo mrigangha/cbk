@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/mrigangha/cbk/internals/tools"
 )
 
 type AdSetResponse struct {
@@ -352,16 +354,6 @@ type ConnectedMetaAccount struct {
 	AccessToken    string `json:"access_token"`
 }
 
-type CampaignResponse struct {
-	Data []Campaign `json:"data"`
-}
-
-type Campaign struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-}
-
 func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
 	user := a.GetUser(r)
 	if user == nil {
@@ -419,7 +411,7 @@ func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var campaigns CampaignResponse
+	var campaigns tools.CampaignResponse
 
 	if err := json.NewDecoder(resp.Body).Decode(&campaigns); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
