@@ -606,6 +606,8 @@ func NewToolHandler() *ToolHandler {
 		Handler: CompareCampaigns,
 	})
 
+	RegisterAnalyticsTool(h)
+
 	return h
 }
 

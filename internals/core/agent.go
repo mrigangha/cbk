@@ -328,6 +328,9 @@ func (a *Api) prepareAgentRun(
 
 	if activeGoal != nil {
 		runtime.ContextBlocks = append(runtime.ContextBlocks, goalContextBlock(activeGoal))
+		tools.ToolsGoalSnapshot = goalSnapshot(activeGoal)
+	} else {
+		tools.ToolsGoalSnapshot = nil
 	}
 
 	return &agentReq, &agentRun{

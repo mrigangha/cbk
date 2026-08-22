@@ -112,6 +112,18 @@ func NewApi() *Api {
 		r.Post("/{goalID}/activate", api.ActivateGoal)
 		r.Post("/{goalID}/complete", api.CompleteGoal)
 	})
+
+	r.Route("/analytics", func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Get("/overview", api.AnalyticsOverview)
+		r.Get("/campaigns", api.AnalyticsCampaigns)
+		r.Get("/adsets", api.AnalyticsAdSets)
+		r.Get("/ads", api.AnalyticsAds)
+		r.Get("/trends", api.AnalyticsTrends)
+		r.Get("/anomalies", api.AnalyticsAnomalies)
+		r.Get("/compare", api.AnalyticsCompare)
+	})
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)
 	r.With(AuthMiddleware).Delete("/auth/meta/accounts", api.DeleteConnectedMetaAccounts)

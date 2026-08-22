@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mrigangha/cbk/internals/analytics"
 )
 
 // TestAllTools_Execute runs every registered tool through ExecuteTool
@@ -69,7 +71,14 @@ func TestAllTools_Execute(t *testing.T) {
 
 	old := graphBaseURL
 	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+
+	oldAnalytics := analytics.GraphBaseURL()
+	analytics.SetGraphBaseURL(ts.URL)
+
+	defer func() {
+		graphBaseURL = old
+		analytics.SetGraphBaseURL(oldAnalytics)
+	}()
 
 	h := NewToolHandler()
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
@@ -113,6 +122,8 @@ func TestAllTools_Execute(t *testing.T) {
 		{"get_adset_insights", map[string]any{"adset_id": "888"}},
 		{"get_ad_insights", map[string]any{"ad_id": "999"}},
 		{"compare_campaigns", map[string]any{"campaign_ids": []any{"888", "999"}}},
+		// Intelligence
+		{"get_analytics", nil},
 	}
 
 	registered := h.GetTools()
