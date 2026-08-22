@@ -74,9 +74,16 @@ func TestAllTools_Execute(t *testing.T) {
 
 	analytics.SetGraphBaseURL(ts.URL)
 
+	// explain_action reads stored proposals via the host hook; stub it.
+	oldFetcher := OptimizationActionFetcher
+	OptimizationActionFetcher = func(userID int64, actionID int64) (any, error) {
+		return map[string]any{"action": map[string]any{"id": actionID}}, nil
+	}
+
 	defer func() {
 		SetGraphBaseURL(old)
 		analytics.SetGraphBaseURL(old)
+		OptimizationActionFetcher = oldFetcher
 	}()
 
 	h := NewToolHandler()
@@ -125,6 +132,7 @@ func TestAllTools_Execute(t *testing.T) {
 		{"get_analytics", nil},
 		{"get_recommendations", nil},
 		{"optimize_campaign", map[string]any{"dry_run": true}},
+		{"explain_action", map[string]any{"action_id": float64(1)}},
 	}
 
 	registered := h.GetTools()

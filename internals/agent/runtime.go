@@ -288,7 +288,7 @@ func (r *Runtime) Run(goal string, history []tools.Message) (*RunResult, error) 
 		)
 	}
 
-		result.Status = "max_iterations_reached"
+	result.Status = "max_iterations_reached"
 	result.Iterations = r.MaxIterations
 	return result, nil
 }
@@ -332,21 +332,21 @@ func (r *Runtime) applyPlan(args map[string]any) Observation {
 		})
 	}
 
-		if len(plan) == 0 {
-			return Observation{
-				Tool:  planToolName,
-				Error: "no valid steps provided",
-			}
-		}
-
-		r.plan = plan
-
-		r.emit(Event{
-			Type: EventPlan,
-			Plan: append([]PlanStep{}, plan...),
-		})
-
+	if len(plan) == 0 {
 		return Observation{
+			Tool:  planToolName,
+			Error: "no valid steps provided",
+		}
+	}
+
+	r.plan = plan
+
+	r.emit(Event{
+		Type: EventPlan,
+		Plan: append([]PlanStep{}, plan...),
+	})
+
+	return Observation{
 		Tool: planToolName,
 		Result: map[string]any{
 			"plan_updated": true,

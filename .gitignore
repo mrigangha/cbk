@@ -1,1 +1,6 @@
 .env
+
+app.db-shm
+app.db-wal
+*.db-wal
+*.db-shm

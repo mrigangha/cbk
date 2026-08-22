@@ -3,12 +3,21 @@ package main
 import (
 	"database/sql"
 	"log"
+	"os"
 
 	_ "modernc.org/sqlite"
 )
 
 func main() {
-	db, err := sql.Open("sqlite", "app.db")
+
+	// Optional first argument overrides the database path
+	// (used by integration tests and CI).
+	dbPath := "app.db"
+	if len(os.Args) > 1 {
+		dbPath = os.Args[1]
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,6 +60,7 @@ func main() {
 		migrateV6,
 		migrateV7,
 		migrateV8,
+		migrateV9,
 	}
 
 	for _, m := range migrators {

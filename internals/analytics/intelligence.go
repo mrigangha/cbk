@@ -259,7 +259,7 @@ func AssessFatigue(days []TimePoint, current Metrics) CreativeFatigue {
 	})
 
 	last := days[max(0, len(days)-7):]
-	prev := days[max(0, len(days)-14) : max(0, len(days)-7)]
+	prev := days[max(0, len(days)-14):max(0, len(days)-7)]
 
 	lastCTR := avgTimePoint(last, func(t TimePoint) float64 { return t.Metrics.CTR })
 	prevCTR := avgTimePoint(prev, func(t TimePoint) float64 { return t.Metrics.CTR })
@@ -526,8 +526,8 @@ func TrendDirections(days []TimePoint) map[string]string {
 	first, second := sorted[:half], sorted[half:]
 
 	type pickFn struct {
-		name string
-		fn   func(Metrics) float64
+		name    string
+		fn      func(Metrics) float64
 		inverse bool // falling is good
 	}
 

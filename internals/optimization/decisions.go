@@ -18,17 +18,17 @@ type Input struct {
 // Decision is one recommended action — the shape returned by the
 // decision engine and exposed over the API and to the agent.
 type Decision struct {
-	CampaignID       string           `json:"campaign_id"`
-	CampaignName     string           `json:"campaign_name,omitempty"`
-	ObjectType       ObjectType       `json:"object_type"`
-	Health           string           `json:"health"`
-	PerformanceScore int              `json:"performance_score"`
-	RuleID           string           `json:"rule_id"`
-	Reason           string           `json:"reason"`
-	RecommendedAction string          `json:"recommended_action"`
-	Confidence       float64          `json:"confidence"` // 0–1
-	SuggestedChange  *SuggestedChange `json:"suggested_change,omitempty"`
-	Signals          []string         `json:"signals,omitempty"`
+	CampaignID        string           `json:"campaign_id"`
+	CampaignName      string           `json:"campaign_name,omitempty"`
+	ObjectType        ObjectType       `json:"object_type"`
+	Health            string           `json:"health"`
+	PerformanceScore  int              `json:"performance_score"`
+	RuleID            string           `json:"rule_id"`
+	Reason            string           `json:"reason"`
+	RecommendedAction string           `json:"recommended_action"`
+	Confidence        float64          `json:"confidence"` // 0–1
+	SuggestedChange   *SuggestedChange `json:"suggested_change,omitempty"`
+	Signals           []string         `json:"signals,omitempty"`
 
 	// RequiresConfirmation marks actions a human must approve before
 	// execution (pauses, increases, anything that can spend or stop money).
@@ -37,12 +37,12 @@ type Decision struct {
 
 func baseDecision(in Input, ruleID string) Decision {
 	return Decision{
-		CampaignID:   in.Analysis.ID,
-		CampaignName: in.Analysis.Name,
-		ObjectType:   in.ObjectType,
-		Health:       in.Analysis.Health.Status,
+		CampaignID:       in.Analysis.ID,
+		CampaignName:     in.Analysis.Name,
+		ObjectType:       in.ObjectType,
+		Health:           in.Analysis.Health.Status,
 		PerformanceScore: in.Analysis.Performance.Score,
-		RuleID:       ruleID,
+		RuleID:           ruleID,
 	}
 }
 

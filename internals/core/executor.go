@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +15,21 @@ import (
 	"github.com/mrigangha/cbk/internals/optimization"
 	"github.com/mrigangha/cbk/internals/tools"
 )
+
+// execLocks serializes execution per user+object. Without it, two
+// concurrent executes could both pass the idempotency/cooldown reads
+// before either recorded its write, mutating Meta twice.
+var execLocks sync.Map
+
+func lockObjectExec(userID int64, objectID string) func() {
+
+	v, _ := execLocks.LoadOrStore(
+		fmt.Sprintf("%d:%s", userID, objectID), &sync.Mutex{})
+
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // ExecuteOptimizationAction runs an APPROVED proposal against the Meta
 // API, behind the guardrails. This is the only path from recommendation
@@ -52,15 +69,75 @@ func (a *Api) ExecuteOptimizationAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	result := a.runOptimizationAction(user.ID, a.metaToolContext(r), action)
+	// Serialize the whole read-check-mutate-record sequence per object.
+	unlock := lockObjectExec(user.ID, action.ObjectID)
+	defer unlock()
+
+	// --- Idempotent replay protection: if this exact proposal already
+	// executed successfully, return its stored outcome instead of
+	// touching Meta a second time.
+	if action.IdempotencyKey != "" {
+
+		var (
+			existingID int64
+			resultRaw  sql.NullString
+		)
+		err := a.db.QueryRow(`
+			SELECT id, COALESCE(result, '')
+			FROM optimization_actions
+			WHERE user_id = ? AND idempotency_key = ?
+			  AND status = 'EXECUTED' AND id != ?
+			ORDER BY executed_at DESC LIMIT 1
+		`, user.ID, action.IdempotencyKey, id).Scan(&existingID, &resultRaw)
+
+		if err == nil {
+			a.writeJSONValue(w, map[string]any{
+				"id":       existingID,
+				"executed": true,
+				"replayed": true,
+				"message":  "already executed — returning stored result",
+				"result":   json.RawMessage(orEmpty(resultRaw)),
+			})
+			return
+		}
+		if err != sql.ErrNoRows {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	result := a.runOptimizationAction(user, a.metaToolContext(r), action)
 
 	if result.Success {
-		a.db.Exec(`
+
+		_, uerr := a.db.Exec(`
 			UPDATE optimization_actions
 			SET status = 'EXECUTED', executed_at = CURRENT_TIMESTAMP,
 			    result = ?, error = ''
 			WHERE id = ?
 		`, mustJSON(result), id)
+
+		switch {
+		case uerr != nil && strings.Contains(uerr.Error(), "UNIQUE constraint failed"):
+			// DB backstop caught a same-key double execution (e.g.
+			// another process): behave exactly like a replay.
+			a.writeJSONValue(w, map[string]any{
+				"id":       id,
+				"executed": true,
+				"replayed": true,
+				"message":  "already executed — returning stored result",
+				"result":   json.RawMessage("null"),
+			})
+			return
+
+		case uerr != nil:
+			// Meta was changed but the row wasn't marked — never
+			// report a clean success in that state.
+			result.Success = false
+			result.Message = "change applied to Meta but recording failed: " +
+				uerr.Error()
+		}
+
 	} else {
 		a.db.Exec(`
 			UPDATE optimization_actions
@@ -101,7 +178,7 @@ func mustJSON(v any) string {
 // runOptimizationAction validates against the guardrails and dispatches
 // to the existing Meta CRUD tools.
 func (a *Api) runOptimizationAction(
-	userID int64,
+	user *User,
 	toolCtx tools.ToolContext,
 	action *StoredAction,
 ) ExecutionResult {
@@ -135,15 +212,15 @@ func (a *Api) runOptimizationAction(
 	a.db.QueryRow(`
 		SELECT MAX(executed_at) FROM optimization_actions
 		WHERE user_id = ? AND object_id = ? AND status = 'EXECUTED'
-	`, userID, action.ObjectID).Scan(&lastExecuted)
+	`, user.ID, action.ObjectID).Scan(&lastExecuted)
 
 	vc := ValidationContext{
-		ObjectType:    action.ObjectType,
-		Action:        action.Action,
-		Conversions:   conversions,
-		DaysInWindow:  daysInWindow,
-		RequestedPct:  suggested.DailyBudgetPct,
-		Now:           now,
+		ObjectType:   action.ObjectType,
+		Action:       action.Action,
+		Conversions:  conversions,
+		DaysInWindow: daysInWindow,
+		RequestedPct: suggested.DailyBudgetPct,
+		Now:          now,
 	}
 
 	if lastExecuted.Valid && lastExecuted.String != "" {
@@ -167,6 +244,11 @@ func (a *Api) runOptimizationAction(
 		res.Message = reason
 		return res
 	}
+
+	// --- Snapshot the BEFORE window so the outcome evaluator can later
+	// compare like-for-like. Window = the proposal's decision window
+	// ending on execution day.
+	a.captureBeforeMetrics(user.ID, action, daysInWindow)
 
 	switch action.Action {
 
@@ -260,6 +342,8 @@ func (a *Api) metaToolContext(r *http.Request) tools.ToolContext {
 		return ctx
 	}
 
+	ctx.UserID = user.ID
+
 	a.db.QueryRow(`
 		SELECT access_token, ad_account_id
 		FROM meta_ads_accounts
@@ -298,4 +382,54 @@ func fetchLiveState(
 	}
 
 	return status, dailyBudget, nil
+}
+
+// captureBeforeMetrics stores the pre-action metric snapshot used later
+// by the outcome evaluator.
+func (a *Api) captureBeforeMetrics(userID int64, action *StoredAction, days int) {
+
+	if days <= 0 {
+		days = 30
+	}
+
+	until := time.Now().UTC()
+	since := until.AddDate(0, 0, -(days - 1))
+
+	metrics, err := analytics.FetchMetricsRange(
+		a.metaTokenFor(userID),
+		action.ObjectID,
+		scopeForObjectType(action.ObjectType),
+		since.Format("2006-01-02"),
+		until.Format("2006-01-02"),
+	)
+	if err != nil {
+		return // snapshot is best-effort; execution continues
+	}
+
+	raw, merr := json.Marshal(metrics)
+	if merr != nil {
+		return
+	}
+
+	a.db.Exec(`UPDATE optimization_actions SET before_metrics = ? WHERE id = ?`,
+		string(raw), action.ID)
+
+	action.BeforeMetrics = raw
+}
+
+func orEmpty(s sql.NullString) string {
+	if !s.Valid {
+		return ""
+	}
+	return s.String
+}
+
+// metaTokenFor loads any user's Meta access token (outcome collector).
+func (a *Api) metaTokenFor(userID int64) string {
+	var token string
+	a.db.QueryRow(`
+		SELECT access_token FROM meta_ads_accounts
+		WHERE user_id = ? LIMIT 1
+	`, userID).Scan(&token)
+	return token
 }

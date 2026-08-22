@@ -105,6 +105,10 @@ func FetchMetrics(
 	datePreset string,
 ) (Metrics, error) {
 
+	if objectID == "" {
+		return Metrics{}, fmt.Errorf("object id required for %s insights", scope)
+	}
+
 	q := url.Values{
 		"fields":      []string{insightFields},
 		"date_preset": []string{datePreset},
@@ -125,6 +129,10 @@ func FetchDaily(
 	scope Scope,
 	datePreset string,
 ) ([]TimePoint, error) {
+
+	if objectID == "" {
+		return nil, fmt.Errorf("object id required for %s insights", scope)
+	}
 
 	q := url.Values{
 		"fields":         []string{insightFields},
@@ -177,6 +185,10 @@ func ListObjects(
 	kind string, // campaigns | adsets | ads
 ) ([]map[string]any, error) {
 
+	if accountID == "" {
+		return nil, fmt.Errorf("account id required to list %s", kind)
+	}
+
 	var path string
 	fields := ""
 
@@ -208,4 +220,33 @@ func ListObjects(
 	}
 
 	return list, nil
+}
+
+// FetchMetricsRange pulls normalized metrics for an explicit date range
+// (YYYY-MM-DD), used by outcome tracking to snapshot windows relative
+// to an action's execution date.
+func FetchMetricsRange(
+	token, objectID string,
+	scope Scope,
+	since, until string,
+) (Metrics, error) {
+
+	if objectID == "" {
+		return Metrics{}, fmt.Errorf("object id required for %s insights", scope)
+	}
+
+	q := url.Values{
+		"fields": []string{insightFields},
+		"time_range": []string{
+			fmt.Sprintf(`{"since":"%s","until":"%s"}`, since, until),
+		},
+		"limit": []string{"500"},
+	}
+
+	out, err := get(token, scope.path(objectID), q)
+	if err != nil {
+		return Metrics{}, err
+	}
+
+	return rowsToMetrics(out), nil
 }

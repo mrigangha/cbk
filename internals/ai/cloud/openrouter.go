@@ -33,11 +33,11 @@ func newOpenRouterProvider(apiKey, model, baseURL string) *openRouterProvider {
 // ===========================
 
 type openAIMessage struct {
-	Role       string          `json:"role"`
-	Content    any             `json:"content"` // string or null (tool_calls only)
+	Role       string           `json:"role"`
+	Content    any              `json:"content"` // string or null (tool_calls only)
 	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Name       string           `json:"name,omitempty"`
 }
 
 type openAIToolCall struct {

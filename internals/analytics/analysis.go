@@ -23,16 +23,16 @@ type ObjectAnalysis struct {
 
 // Report is the full analytics payload for an endpoint or agent tool.
 type Report struct {
-	Scope      Scope            `json:"scope"`
-	ObjectID   string           `json:"object_id,omitempty"`
-	DatePreset string           `json:"date_preset"`
-	DaysInWin  int              `json:"days_in_window,omitempty"`
+	Scope      Scope  `json:"scope"`
+	ObjectID   string `json:"object_id,omitempty"`
+	DatePreset string `json:"date_preset"`
+	DaysInWin  int    `json:"days_in_window,omitempty"`
 
-	Totals        Metrics          `json:"totals"`
-	Objects       []ObjectAnalysis `json:"objects,omitempty"`
-	TrendDir      map[string]string `json:"trend_directions,omitempty"`
-	Anomalies     []Anomaly        `json:"anomalies,omitempty"`
-	GoalProgress  *GoalProgress    `json:"goal_progress,omitempty"`
+	Totals       Metrics           `json:"totals"`
+	Objects      []ObjectAnalysis  `json:"objects,omitempty"`
+	TrendDir     map[string]string `json:"trend_directions,omitempty"`
+	Anomalies    []Anomaly         `json:"anomalies,omitempty"`
+	GoalProgress *GoalProgress     `json:"goal_progress,omitempty"`
 }
 
 // AnalyzeSet fetches metrics for each object, scores them and returns
@@ -241,22 +241,22 @@ func BuildReport(
 // Compare ranks objects against each other on normalized results and
 // reports relative deltas versus the best performer.
 type Comparison struct {
-	Scope      Scope             `json:"scope"`
-	DatePreset string            `json:"date_preset"`
-	Ranked     []RankedObject    `json:"ranked"`
-	Notes      []string          `json:"notes,omitempty"`
+	Scope      Scope          `json:"scope"`
+	DatePreset string         `json:"date_preset"`
+	Ranked     []RankedObject `json:"ranked"`
+	Notes      []string       `json:"notes,omitempty"`
 }
 
 type RankedObject struct {
 	ObjectAnalysis
-	Rank            int     `json:"rank"`
+	Rank              int     `json:"rank"`
 	CPLDeltaVsBestPct float64 `json:"cpl_delta_vs_best_pct,omitempty"`
 	CPADeltaVsBestPct float64 `json:"cpa_delta_vs_best_pct,omitempty"`
 	SpendSharePct     float64 `json:"spend_share_pct,omitempty"`
 	ResultSharePct    float64 `json:"result_share_pct,omitempty"`
 	EfficiencyIndex   float64 `json:"efficiency_index,omitempty"`
-	PrimaryMetric   string  `json:"primary_metric"`
-	PrimaryValue    float64 `json:"primary_value"`
+	PrimaryMetric     string  `json:"primary_metric"`
+	PrimaryValue      float64 `json:"primary_value"`
 }
 
 // enrichObject fills name/status/objective for an object from its

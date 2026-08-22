@@ -17,10 +17,19 @@ type Api struct {
 	toolHandler *tools.ToolHandler
 }
 
+// sqliteDSN appends the pragmas every connection pool needs.
+func sqliteDSN(path string) string {
+	return "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+}
+
 func NewApi() *Api {
 	api := Api{}
 	api.toolHandler = tools.NewToolHandler()
-	db, err := sql.Open("sqlite", "app.db")
+	db, err := sql.Open("sqlite",
+		// WAL + busy timeout: handlers and the outcome-collector
+		// goroutine hit the DB concurrently; without these SQLite
+		// returns instant SQLITE_BUSY under contention.
+		sqliteDSN("app.db"))
 	if err != nil {
 		panic(err)
 	}
@@ -97,6 +106,7 @@ func NewApi() *Api {
 		r.Get("/agent/sessions", api.ListAgentSessions)
 		r.Post("/agent/sessions", api.CreateAgentSession)
 		r.Get("/agent/sessions/{sessionID}/messages", api.GetAgentSessionMessages)
+		r.Patch("/agent/sessions/{sessionID}", api.UpdateAgentSession)
 		r.Delete("/agent/sessions/{sessionID}", api.DeleteAgentSession)
 	})
 
@@ -133,10 +143,15 @@ func NewApi() *Api {
 		r.Use(AuthMiddleware)
 
 		r.Post("/generate", api.GenerateOptimizationActions)
+		r.Post("/simulate", api.SimulateOptimizations)
 		r.Get("/actions", api.ListOptimizationActions)
 		r.Post("/actions/{actionID}/approve", api.ApproveOptimizationAction)
 		r.Post("/actions/{actionID}/reject", api.RejectOptimizationAction)
 		r.Post("/actions/{actionID}/execute", api.ExecuteOptimizationAction)
+		r.Get("/actions/{actionID}", api.GetOptimizationAction)
+		r.Get("/outcomes", api.ListOptimizationOutcomes)
+		r.Get("/performance", api.OptimizationPerformance)
+		r.Get("/effectiveness", api.GetOptimizationEffectiveness)
 	})
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)

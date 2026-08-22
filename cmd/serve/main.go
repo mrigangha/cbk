@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/mrigangha/cbk/internals/core"
@@ -78,6 +79,9 @@ func main() {
 	}
 	api := core.NewApi()
 	defer api.Cleanup()
+
+	// Fill 1d/3d/7d optimization outcome windows as they mature.
+	api.StartOutcomeCollector(30 * time.Minute)
 
 	err = http.ListenAndServe(":3000", api.Router())
 	if err != nil {

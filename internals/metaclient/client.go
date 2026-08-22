@@ -72,10 +72,10 @@ var throttleCodes = map[float64]bool{
 // ===========================
 
 type keyState struct {
-	tokens        float64
-	lastRefill    time.Time
-	usagePct      float64
-	blockedUntil  time.Time
+	tokens         float64
+	lastRefill     time.Time
+	usagePct       float64
+	blockedUntil   time.Time
 	consecThrottle int
 }
 
@@ -91,23 +91,23 @@ type inflightCall struct {
 }
 
 type Client struct {
-	cfg      Config
-	http     *http.Client
-	baseURL  string
+	cfg     Config
+	http    *http.Client
+	baseURL string
 
-	mu         sync.Mutex
-	keys       map[string]*keyState
-	cache      map[string]cacheEntry
-	inflight   map[string]*inflightCall
-	slots      chan struct{}
+	mu       sync.Mutex
+	keys     map[string]*keyState
+	cache    map[string]cacheEntry
+	inflight map[string]*inflightCall
+	slots    chan struct{}
 
 	// observability counters
-	totalCalls     uint64
-	throttledHits  uint64
-	retries        uint64
-	cacheHits      uint64
-	localBlocks    uint64
-	breakerOpens   uint64
+	totalCalls    uint64
+	throttledHits uint64
+	retries       uint64
+	cacheHits     uint64
+	localBlocks   uint64
+	breakerOpens  uint64
 }
 
 var (
@@ -143,13 +143,13 @@ func BaseURL() string {
 // New builds a client with its own state (tests).
 func New(cfg Config) *Client {
 	return &Client{
-		cfg:     cfg,
-		http:    &http.Client{Timeout: cfg.RequestTimeout},
-		baseURL: "https://graph.facebook.com/v23.0",
-		keys:    map[string]*keyState{},
-		cache:   map[string]cacheEntry{},
+		cfg:      cfg,
+		http:     &http.Client{Timeout: cfg.RequestTimeout},
+		baseURL:  "https://graph.facebook.com/v23.0",
+		keys:     map[string]*keyState{},
+		cache:    map[string]cacheEntry{},
 		inflight: map[string]*inflightCall{},
-		slots:   make(chan struct{}, cfg.MaxConcurrent),
+		slots:    make(chan struct{}, cfg.MaxConcurrent),
 	}
 }
 
@@ -173,7 +173,17 @@ func (c *Client) request(
 	body []byte,
 ) (map[string]any, int, error) {
 
-	full := c.baseURL + path
+	// Callers may pass an absolute URL or a path; join relative ones so a
+	// stray missing slash can't glue onto the version segment.
+	full := path
+	if strings.HasPrefix(path, "http") {
+		// Absolute URL (OAuth endpoints, dashboard handlers): use as-is.
+	} else if !strings.HasPrefix(path, "/") {
+		full = c.baseURL + "/" + path
+	} else {
+		full = c.baseURL + path
+	}
+
 	isGET := method == http.MethodGet
 
 	cacheKey := fmt.Sprintf("%s|%s|%s", method, full, flattenQuery(query))
@@ -296,13 +306,14 @@ func (c *Client) attempt(
 		return nil, 0, err
 	}
 
-	// Callers may pass an absolute URL or a path.
+	// `full` is already final here (absolute URL or joined base+path).
 	url := full
-	if !strings.HasPrefix(url, "http") {
-		url = c.baseURL + url
-	}
 	if len(query) > 0 {
-		url += "?" + encodeQuery(query)
+		sep := "?"
+		if strings.Contains(url, "?") {
+			sep = "&" // absolute URLs often carry their own query string
+		}
+		url += sep + encodeQuery(query)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -495,8 +506,8 @@ func (c *Client) trackUsage(key string, header http.Header) {
 func parseAppUsage(raw string) float64 {
 
 	var parsed struct {
-		CallCount  float64 `json:"call_count"`
-		TotalTime  float64 `json:"total_time"`
+		CallCount    float64 `json:"call_count"`
+		TotalTime    float64 `json:"total_time"`
 		TotalCPUTime float64 `json:"total_cputime"`
 	}
 
@@ -512,8 +523,8 @@ func parseBUCUsage(raw string) float64 {
 
 	// Shape: {"act_123":[{"call_count":20,"total_time":30,...}], ...}
 	var parsed map[string][]struct {
-		CallCount float64 `json:"call_count"`
-		TotalTime float64 `json:"total_time"`
+		CallCount    float64 `json:"call_count"`
+		TotalTime    float64 `json:"total_time"`
 		TotalCPUTime float64 `json:"total_cputime"`
 	}
 
@@ -621,19 +632,19 @@ func (c *Client) completeInflight(key string, data map[string]any, err error) {
 // ===========================
 
 type Status struct {
-	TotalCalls    uint64             `json:"total_calls"`
-	ThrottledHits uint64             `json:"throttled_hits"`
-	Retries       uint64             `json:"retries"`
-	CacheHits     uint64             `json:"cache_hits"`
-	LocalBlocks   uint64             `json:"local_blocks"`
-	BreakerOpens  uint64             `json:"breaker_opens"`
-	OpenCircuits  []OpenCircuit      `json:"open_circuits,omitempty"`
+	TotalCalls    uint64        `json:"total_calls"`
+	ThrottledHits uint64        `json:"throttled_hits"`
+	Retries       uint64        `json:"retries"`
+	CacheHits     uint64        `json:"cache_hits"`
+	LocalBlocks   uint64        `json:"local_blocks"`
+	BreakerOpens  uint64        `json:"breaker_opens"`
+	OpenCircuits  []OpenCircuit `json:"open_circuits,omitempty"`
 }
 
 type OpenCircuit struct {
-	Key          string        `json:"key"`
-	UsagePct     float64       `json:"usage_pct"`
-	BlockedForMs int64         `json:"blocked_for_ms"`
+	Key          string  `json:"key"`
+	UsagePct     float64 `json:"usage_pct"`
+	BlockedForMs int64   `json:"blocked_for_ms"`
 }
 
 // StatusSnapshot summarizes protection state for observability.

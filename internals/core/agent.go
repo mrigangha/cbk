@@ -324,6 +324,7 @@ func (a *Api) prepareAgentRun(
 		tools.ToolContext{
 			AccessToken: accessToken,
 			AdAccountID: adAccountID,
+			UserID:      user.ID,
 		},
 	)
 
@@ -348,7 +349,17 @@ func (a *Api) prepareAgentRun(
 			return 0, 0, err
 		}
 
-		return a.persistProposals(user.ID, token, accountID, datePreset, level, rep, goal)
+		var goalID *int64
+		if activeGoal != nil {
+			gid := activeGoal.ID
+			goalID = &gid
+		}
+
+		return a.persistProposals(user.ID, token, accountID, datePreset, level, rep, goal, goalID)
+	}
+
+	tools.OptimizationActionFetcher = func(userID int64, actionID int64) (any, error) {
+		return a.actionExplanation(userID, actionID)
 	}
 
 	return &agentReq, &agentRun{

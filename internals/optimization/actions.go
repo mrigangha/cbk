@@ -60,11 +60,11 @@ func ValidAction(s string) bool {
 // Lifecycle status of a stored proposal. Execution is gated on APPROVED
 // but performed by the future executor milestone — never automatically.
 const (
-	StatusPending   = "PENDING"
-	StatusApproved  = "APPROVED"
-	StatusRejected  = "REJECTED"
-	StatusExecuted  = "EXECUTED"
-	StatusFailed    = "FAILED"
+	StatusPending  = "PENDING"
+	StatusApproved = "APPROVED"
+	StatusRejected = "REJECTED"
+	StatusExecuted = "EXECUTED"
+	StatusFailed   = "FAILED"
 )
 
 // SuggestedChange is the concrete parameter delta that backs an action.

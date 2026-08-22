@@ -614,4 +614,3 @@ func TestCompareCampaigns_TooMany(t *testing.T) {
 		t.Errorf("expected maximum error, got %q", err.Error())
 	}
 }
-

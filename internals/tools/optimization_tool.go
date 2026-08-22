@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/mrigangha/cbk/internals/analytics"
 	"github.com/mrigangha/cbk/internals/optimization"
@@ -140,4 +141,46 @@ func buildOptimizationReport(
 		Totals:     totals,
 		Objects:    analyses,
 	}, nil
+}
+
+// OptimizationActionFetcher is set by the host so the agent can pull the
+// full audit trail for a stored proposal.
+var OptimizationActionFetcher func(userID int64, actionID int64) (any, error)
+
+// ExplainAction returns everything behind a stored optimization decision:
+// reason, rule, confidence, audit signals, before-metrics and outcomes.
+func ExplainAction(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	if OptimizationActionFetcher == nil {
+		return nil, fmt.Errorf("action history unavailable in this context")
+	}
+
+	idVal, ok := args["action_id"].(float64)
+	if !ok {
+		// Gemini sometimes delivers numbers as strings.
+		if s, ok := args["action_id"].(string); ok {
+			parsed, perr := strconv.Atoi(s)
+			if perr != nil {
+				return nil, fmt.Errorf("invalid action_id %q", s)
+			}
+			idVal = float64(parsed)
+		} else {
+			return nil, fmt.Errorf("missing action_id")
+		}
+	}
+
+	userID := ctx.UserID
+
+	explanation, err := OptimizationActionFetcher(userID, int64(idVal))
+	if err != nil {
+		return nil, err
+	}
+	if explanation == nil {
+		return nil, fmt.Errorf("action %d not found", int64(idVal))
+	}
+
+	return explanation, nil
 }

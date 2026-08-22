@@ -15,20 +15,20 @@ type Metrics struct {
 	Impressions float64 `json:"impressions"`
 	Reach       float64 `json:"reach"`
 	Clicks      float64 `json:"clicks"`
-	CTR         float64 `json:"ctr"`      // %
-	CPC         float64 `json:"cpc"`      // cost per click
-	CPM         float64 `json:"cpm"`      // cost per 1000 impressions
+	CTR         float64 `json:"ctr"` // %
+	CPC         float64 `json:"cpc"` // cost per click
+	CPM         float64 `json:"cpm"` // cost per 1000 impressions
 	Frequency   float64 `json:"frequency"`
 
 	Leads     float64 `json:"leads"`
 	Purchases float64 `json:"purchases"`
 
-	Conversions    float64 `json:"conversions"`
+	Conversions     float64 `json:"conversions"`
 	ConversionValue float64 `json:"conversion_value"`
 
-	CVR float64 `json:"cvr"` // conversions / clicks, %
-	CPL float64 `json:"cpl"` // spend per lead
-	CPA float64 `json:"cpa"` // spend per conversion
+	CVR  float64 `json:"cvr"` // conversions / clicks, %
+	CPL  float64 `json:"cpl"` // spend per lead
+	CPA  float64 `json:"cpa"` // spend per conversion
 	ROAS float64 `json:"roas"`
 }
 

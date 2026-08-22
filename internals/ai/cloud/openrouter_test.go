@@ -59,7 +59,7 @@ func TestOpenRouter_RequestConversion(t *testing.T) {
 
 	req := tools.GenerateContentRequest{
 		SystemInstruction: &tools.Content{
-			Role: "system",
+			Role:  "system",
 			Parts: []tools.Part{{Text: "You are an agent."}},
 		},
 		Contents: []tools.Content{
@@ -69,7 +69,7 @@ func TestOpenRouter_RequestConversion(t *testing.T) {
 			}},
 			{Role: "tool", Parts: []tools.Part{
 				{FunctionResponse: &tools.FunctionResponse{
-					Name:    "list_campaigns",
+					Name:     "list_campaigns",
 					Response: map[string]any{"result": "ok"},
 				}},
 			}},

@@ -14,6 +14,7 @@ type Tool struct {
 type ToolContext struct {
 	AccessToken string
 	AdAccountID string
+	UserID      int64
 }
 
 type ToolHandler struct {
@@ -648,6 +649,22 @@ func NewToolHandler() *ToolHandler {
 		Handler: OptimizeCampaign,
 	})
 
+	h.RegisterTool(Tool{
+		Name:        "explain_action",
+		Description: "Returns the full audit trail behind a stored optimization proposal: the reason, the rule that fired, its confidence, every evidence signal (metrics vs goal targets, pacing, fatigue), the before-snapshot, and any captured outcomes. Use this whenever the user asks why an action was taken or proposed.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"action_id": map[string]any{
+					"type":        "STRING",
+					"description": "The optimization action ID to explain.",
+				},
+			},
+			"required": []string{"action_id"},
+		},
+		Handler: ExplainAction,
+	})
+
 	return h
 }
 
@@ -688,8 +705,8 @@ func (h *ToolHandler) GetTools() []Tool {
 // ===========================
 
 type GenerateContentRequest struct {
-	SystemInstruction *Content    `json:"systemInstruction,omitempty"`
-	Contents          []Content   `json:"contents"`
+	SystemInstruction *Content     `json:"systemInstruction,omitempty"`
+	Contents          []Content    `json:"contents"`
 	Tools             []GeminiTool `json:"tools,omitempty"`
 }
 

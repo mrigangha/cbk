@@ -45,6 +45,7 @@ type analyticsCtx struct {
 	accountID  string
 	datePreset string
 	goal       *analytics.GoalSnapshot
+	goalID     *int64 // DB id of the linked marketing goal, when set
 }
 
 func (a *Api) resolveAnalyticsCtx(
@@ -92,9 +93,11 @@ func (a *Api) resolveAnalyticsCtx(
 	if rawGoalID := r.URL.Query().Get("goal_id"); rawGoalID != "" {
 		goalID, err := strconv.ParseInt(rawGoalID, 10, 64)
 		if err == nil && goalID > 0 {
-			goal, err := a.getOwnedGoal(r, goalID)
-			if err == nil && goal != nil {
+			goal, gerr := a.getOwnedGoal(r, goalID)
+			if gerr == nil && goal != nil {
 				ctx.goal = goalSnapshot(goal)
+				gid := goal.ID
+				ctx.goalID = &gid
 			}
 		}
 	} else if sessionID := r.URL.Query().Get("session_id"); sessionID != "" {

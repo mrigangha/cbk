@@ -413,14 +413,14 @@ func GetAdSet(
 // validGoalBillingPairs lists optimization goals we can pre-validate,
 // with the billing events Meta allows for each.
 var validGoalBillingPairs = map[string][]string{
-	"REACH":                {"IMPRESSIONS"},
-	"IMPRESSIONS":          {"IMPRESSIONS"},
-	"LINK_CLICKS":          {"LINK_CLICKS"},
-	"POST_ENGAGEMENT":      {"POST_ENGAGEMENT"},
-	"OFFSITE_CONVERSIONS":  {"IMPRESSIONS", "LINK_CLICKS"},
-	"QUALITY_LEAD":         {"IMPRESSIONS", "LINK_CLICKS"},
-	"VALUE":                {"IMPRESSIONS", "LINK_CLICKS"},
-	"THRUPLAY":             {"IMPRESSIONS"},
+	"REACH":               {"IMPRESSIONS"},
+	"IMPRESSIONS":         {"IMPRESSIONS"},
+	"LINK_CLICKS":         {"LINK_CLICKS"},
+	"POST_ENGAGEMENT":     {"POST_ENGAGEMENT"},
+	"OFFSITE_CONVERSIONS": {"IMPRESSIONS", "LINK_CLICKS"},
+	"QUALITY_LEAD":        {"IMPRESSIONS", "LINK_CLICKS"},
+	"VALUE":               {"IMPRESSIONS", "LINK_CLICKS"},
+	"THRUPLAY":            {"IMPRESSIONS"},
 }
 
 // goalsRequiringPromotedObject need a promoted_object (e.g. a Meta Pixel)

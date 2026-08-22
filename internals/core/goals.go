@@ -51,10 +51,10 @@ type GoalRequest struct {
 	Description string `json:"description"`
 	Objective   string `json:"objective"`
 
-	TargetCPL   *float64 `json:"target_cpl"`
-	TargetCPA   *float64 `json:"target_cpa"`
-	TargetROAS  *float64 `json:"target_roas"`
-	TargetConversions *int64 `json:"target_conversions"`
+	TargetCPL         *float64 `json:"target_cpl"`
+	TargetCPA         *float64 `json:"target_cpa"`
+	TargetROAS        *float64 `json:"target_roas"`
+	TargetConversions *int64   `json:"target_conversions"`
 
 	Budget      *float64 `json:"budget"`
 	DailyBudget *float64 `json:"daily_budget"`

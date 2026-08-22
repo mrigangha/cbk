@@ -24,8 +24,8 @@ func TestNotDelivering_Pauses(t *testing.T) {
 
 	in := Input{
 		Analysis: analytics.ObjectAnalysis{
-			ID:    "111",
-			Name:  "Silent Campaign",
+			ID:     "111",
+			Name:   "Silent Campaign",
 			Health: analytics.Health{Status: "NOT_DELIVERING"},
 		},
 		DaysInWindow: 10,
