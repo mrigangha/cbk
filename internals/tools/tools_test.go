@@ -69,15 +69,14 @@ func TestAllTools_Execute(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
 
-	oldAnalytics := analytics.GraphBaseURL()
 	analytics.SetGraphBaseURL(ts.URL)
 
 	defer func() {
-		graphBaseURL = old
-		analytics.SetGraphBaseURL(oldAnalytics)
+		SetGraphBaseURL(old)
+		analytics.SetGraphBaseURL(old)
 	}()
 
 	h := NewToolHandler()
@@ -125,6 +124,7 @@ func TestAllTools_Execute(t *testing.T) {
 		// Intelligence
 		{"get_analytics", nil},
 		{"get_recommendations", nil},
+		{"optimize_campaign", map[string]any{"dry_run": true}},
 	}
 
 	registered := h.GetTools()

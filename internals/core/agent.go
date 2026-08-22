@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrigangha/cbk/internals/agent"
 	"github.com/mrigangha/cbk/internals/ai/cloud"
+	"github.com/mrigangha/cbk/internals/analytics"
 	"github.com/mrigangha/cbk/internals/tools"
 )
 
@@ -331,6 +332,23 @@ func (a *Api) prepareAgentRun(
 		tools.ToolsGoalSnapshot = goalSnapshot(activeGoal)
 	} else {
 		tools.ToolsGoalSnapshot = nil
+	}
+
+	// Give the optimize_campaign tool the ability to store PENDING
+	// proposals for human approval.
+	tools.OptimizationPersister = func(
+		token, accountID, datePreset, level string,
+		goal *analytics.GoalSnapshot,
+	) (int, int, error) {
+
+		rep, err := tools.BuildOptimizationReport(
+			token, accountID, datePreset, level, goal,
+		)
+		if err != nil {
+			return 0, 0, err
+		}
+
+		return a.persistProposals(user.ID, token, accountID, datePreset, level, rep, goal)
 	}
 
 	return &agentReq, &agentRun{

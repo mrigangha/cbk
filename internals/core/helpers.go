@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/mrigangha/cbk/internals/metaclient"
 )
 
 func (a *Api) GetUserByEmail(email string) (*User, error) {
@@ -90,28 +92,33 @@ type MetaAdAccount struct {
 	} `json:"business,omitempty"`
 }
 
+// graphGet fetches a Graph API URL through the shared metaclient so
+// dashboard traffic enjoys the same rate-limit protection as the agent.
+func graphGet(url, accessToken string) (int, []byte, error) {
+
+	data, status, err := metaclient.Request(
+		http.MethodGet, url, accessToken, nil, nil,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	body, merr := json.Marshal(data)
+
+	return status, body, merr
+}
+
 func SaveAdsAccounts(accessToken string, userID int64, db *sql.DB) error {
-	req, err := http.NewRequest(
-		"GET",
+	_, body, err := graphGet(
 		"https://graph.facebook.com/v23.0/me/adaccounts?fields=id,name,account_id,currency,timezone_name,business",
-		nil,
+		accessToken,
 	)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
 	var accounts AdAccountsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
+	if err := json.Unmarshal(body, &accounts); err != nil {
 		return err
 	}
 

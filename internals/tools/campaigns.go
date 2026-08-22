@@ -1,21 +1,25 @@
 package tools
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mrigangha/cbk/internals/metaclient"
 )
 
-var graphBaseURL = "https://graph.facebook.com/v23.0"
-
 // SetGraphBaseURL overrides the Meta Graph API base URL.
-// Used by tests to point handlers at a mock server.
+// Used by tests to point handlers at a mock server. Also keeps the
+// shared metaclient pointed at the same mock.
 func SetGraphBaseURL(url string) {
-	graphBaseURL = url
+	metaclient.SetBaseURL(url)
+}
+
+// GraphBaseURL reports the current Meta Graph API base URL.
+func GraphBaseURL() string {
+	return metaclient.BaseURL()
 }
 
 func metaRequest(
@@ -26,55 +30,34 @@ func metaRequest(
 	body map[string]any,
 ) (map[string]any, error) {
 
-	var bodyReader io.Reader
+	var encoded []byte
 
 	if body != nil {
-		encoded, err := json.Marshal(body)
+		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		bodyReader = bytes.NewReader(encoded)
+		encoded = b
 	}
 
-	req, err := http.NewRequest(method, graphBaseURL+path, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
+	var q map[string][]string
 	if query != nil {
-		req.URL.RawQuery = query.Encode()
+		q = query
 	}
 
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
+	result, status, err := metaclient.Request(
+		method, path, accessToken, q, encoded,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if status != http.StatusOK && result == nil {
+		return nil, fmt.Errorf("meta error (%d)", status)
 	}
 
-	var result map[string]any
-
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &result); err != nil {
-			return nil, err
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		msg := fmt.Sprintf("meta error (%d)", resp.StatusCode)
+	if status != http.StatusOK {
+		msg := fmt.Sprintf("meta error (%d)", status)
 
 		if metaErr, ok := result["error"].(map[string]any); ok {
 
@@ -85,24 +68,19 @@ func metaRequest(
 
 			extras := []string{}
 
-			// Human-readable hints Meta often includes.
 			if u, ok := metaErr["error_user_msg"].(string); ok && u != "" {
 				extras = append(extras, u)
 			}
 			if ti, ok := metaErr["error_user_title"].(string); ok && ti != "" {
 				extras = append(extras, ti)
 			}
-
-			// Points at the exact offending request field(s).
 			if ed, ok := metaErr["error_data"].(map[string]any); ok {
 				if blame, ok := ed["blame_field_specs"].([]any); ok && len(blame) > 0 {
-					if b, err := json.Marshal(blame); err == nil {
-						extras = append(extras,
-							"invalid field: "+string(b))
+					if b, jerr := json.Marshal(blame); jerr == nil {
+						extras = append(extras, "invalid field: "+string(b))
 					}
 				}
 			}
-
 			if c, ok := metaErr["code"].(float64); ok {
 				codes := fmt.Sprintf("(code %d", int(c))
 				if sc, ok := metaErr["error_subcode"].(float64); ok {

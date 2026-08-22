@@ -8,27 +8,28 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mrigangha/cbk/internals/analytics"
+	"github.com/mrigangha/cbk/internals/metaclient"
 	"github.com/mrigangha/cbk/internals/optimization"
 )
 
 // StoredAction is a persisted recommendation awaiting human approval.
 type StoredAction struct {
-	ID          int64           `json:"id"`
-	ObjectType  string          `json:"object_type"`
-	ObjectID    string          `json:"object_id"`
-	ObjectName  string          `json:"object_name,omitempty"`
-	Action      string          `json:"action"`
-	Reason      string          `json:"reason"`
-	RuleID      string          `json:"rule_id,omitempty"`
-	Confidence  *float64        `json:"confidence,omitempty"`
+	ID              int64           `json:"id"`
+	ObjectType      string          `json:"object_type"`
+	ObjectID        string          `json:"object_id"`
+	ObjectName      string          `json:"object_name,omitempty"`
+	Action          string          `json:"action"`
+	Reason          string          `json:"reason"`
+	RuleID          string          `json:"rule_id,omitempty"`
+	Confidence      *float64        `json:"confidence,omitempty"`
 	SuggestedChange json.RawMessage `json:"suggested_change,omitempty"`
-	Status      string          `json:"status"`
-	DatePreset  string          `json:"date_preset,omitempty"`
+	Status          string          `json:"status"`
+	DatePreset      string          `json:"date_preset,omitempty"`
 
-	CreatedAt string `json:"created_at"`
-	DecidedAt string `json:"decided_at,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	DecidedAt  string `json:"decided_at,omitempty"`
 	ExecutedAt string `json:"executed_at,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 const storedActionColumns = `
@@ -120,63 +121,13 @@ func (a *Api) GenerateOptimizationActions(w http.ResponseWriter, r *http.Request
 
 	plan := optimization.OptimizeReport(report, actx.goal)
 
-	stored := 0
-	skipped := 0
-
-	for _, d := range plan.Recommendations {
-
-		if d.RecommendedAction == optimization.ActionNoAction {
-			continue // don't persist non-actions
-		}
-
-		changeJSON, _ := json.Marshal(d.SuggestedChange)
-
-		// Skip when an identical PENDING proposal already exists.
-		var existing int64
-		err := a.db.QueryRow(`
-			SELECT id FROM optimization_actions
-			WHERE user_id = ? AND object_id = ? AND action = ? AND status = 'PENDING'
-		`, user.ID, d.CampaignID, d.RecommendedAction).Scan(&existing)
-
-		if err == nil {
-			skipped++
-			continue
-		}
-		if err != sql.ErrNoRows {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		var confidence any
-		if d.Confidence > 0 {
-			confidence = d.Confidence
-		}
-
-		res, err := a.db.Exec(`
-			INSERT INTO optimization_actions (
-				user_id, object_type, object_id, object_name,
-				action, reason, rule_id, confidence, suggested_change,
-				date_preset
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			user.ID,
-			string(d.ObjectType),
-			d.CampaignID,
-			d.CampaignName,
-			d.RecommendedAction,
-			d.Reason,
-			d.RuleID,
-			confidence,
-			string(changeJSON),
-			actx.datePreset,
-		)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_ = res
-
-		stored++
+	stored, skipped, err := a.persistProposals(
+		user.ID, actx.token, actx.accountID,
+		actx.datePreset, level, report, actx.goal,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	a.writeJSONValue(w, map[string]any{
@@ -185,6 +136,75 @@ func (a *Api) GenerateOptimizationActions(w http.ResponseWriter, r *http.Request
 		"duplicate_skipped": skipped,
 		"note":              "Proposals are PENDING. Nothing executes until approved.",
 	})
+}
+
+// persistProposals stores every non-NO_ACTION decision as a PENDING
+// proposal, skipping duplicates. Shared by the REST endpoint and the
+// optimize_campaign agent tool.
+func (a *Api) persistProposals(
+	userID int64,
+	token, accountID, datePreset, level string,
+	report *analytics.Report,
+	goal *analytics.GoalSnapshot,
+) (int, int, error) {
+
+	plan := optimization.OptimizeReport(report, goal)
+
+	stored := 0
+	skipped := 0
+
+	for _, d := range plan.Recommendations {
+
+		if d.RecommendedAction == optimization.ActionNoAction {
+			continue
+		}
+
+		changeJSON, _ := json.Marshal(d.SuggestedChange)
+
+		var existing int64
+		err := a.db.QueryRow(`
+			SELECT id FROM optimization_actions
+			WHERE user_id = ? AND object_id = ? AND action = ? AND status = 'PENDING'
+		`, userID, d.CampaignID, d.RecommendedAction).Scan(&existing)
+
+		if err == nil {
+			skipped++
+			continue
+		}
+		if err != sql.ErrNoRows {
+			return 0, 0, err
+		}
+
+		var confidence any
+		if d.Confidence > 0 {
+			confidence = d.Confidence
+		}
+
+		if _, err := a.db.Exec(`
+			INSERT INTO optimization_actions (
+				user_id, object_type, object_id, object_name,
+				action, reason, rule_id, confidence, suggested_change,
+				date_preset
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			userID,
+			string(d.ObjectType),
+			d.CampaignID,
+			d.CampaignName,
+			d.RecommendedAction,
+			d.Reason,
+			d.RuleID,
+			confidence,
+			string(changeJSON),
+			datePreset,
+		); err != nil {
+			return 0, 0, err
+		}
+
+		stored++
+	}
+
+	return stored, skipped, nil
 }
 
 func (a *Api) ListOptimizationActions(w http.ResponseWriter, r *http.Request) {
@@ -281,4 +301,10 @@ func (a *Api) ApproveOptimizationAction(w http.ResponseWriter, r *http.Request) 
 
 func (a *Api) RejectOptimizationAction(w http.ResponseWriter, r *http.Request) {
 	a.decideOptimizationAction(w, r, optimization.StatusRejected)
+}
+
+// MetaRateLimitStatus exposes the shared client's protection state so
+// the dashboard/agent can see when calls are being suppressed.
+func (a *Api) MetaRateLimitStatus(w http.ResponseWriter, r *http.Request) {
+	a.writeJSONValue(w, metaclient.StatusSnapshot())
 }

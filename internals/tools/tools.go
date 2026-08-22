@@ -610,7 +610,7 @@ func NewToolHandler() *ToolHandler {
 
 	h.RegisterTool(Tool{
 		Name:        "get_recommendations",
-		Description: "Runs the optimization decision engine over all campaigns and returns one concrete recommended action per campaign (PAUSE, DECREASE_BUDGET, INCREASE_BUDGET, REFRESH_CREATIVE or KEEP) with a confidence score, the reason, and the suggested budget/status change. Use this when the user asks what to do, what to optimize, or which campaigns to fix.",
+		Description: "Runs the optimization decision engine over all campaigns and returns one concrete recommended action per campaign (PAUSE_CAMPAIGN, DECREASE_BUDGET, INCREASE_BUDGET, REFRESH_CREATIVE or NO_ACTION) with a confidence score, the reason, and the suggested budget/status change. Use this when the user asks what to do, what to optimize, or which campaigns to fix.",
 		Parameters: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
@@ -622,6 +622,30 @@ func NewToolHandler() *ToolHandler {
 			"required": []string{},
 		},
 		Handler: GetRecommendations,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "optimize_campaign",
+		Description: "Runs the full optimization cycle over campaigns or ad sets and proposes concrete actions with confidence scores. ALWAYS call with dry_run=true first and present the recommendations to the user; only use dry_run=false when the user explicitly asked to create optimization proposals. Nothing ever executes automatically — stored proposals wait for human approval.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"dry_run": map[string]any{
+					"type":        "BOOLEAN",
+					"description": "true (default): report only, change nothing. false: store PENDING proposals for approval.",
+				},
+				"level": map[string]any{
+					"type":        "STRING",
+					"description": "campaigns (default) or adsets.",
+				},
+				"date_preset": map[string]any{
+					"type":        "STRING",
+					"description": "Date window: last_7d, last_30d (default), this_month, etc.",
+				},
+			},
+			"required": []string{},
+		},
+		Handler: OptimizeCampaign,
 	})
 
 	return h

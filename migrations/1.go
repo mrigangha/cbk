@@ -43,28 +43,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := migrateV2(db); err != nil {
-		log.Fatal(err)
+	migrators := []func(*sql.DB) error{
+		migrateV2,
+		migrateV3,
+		migrateV4,
+		migrateV5,
+		migrateV6,
+		migrateV7,
+		migrateV8,
 	}
 
-	if err := migrateV3(db); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := migrateV4(db); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := migrateV5(db); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := migrateV6(db); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := migrateV7(db); err != nil {
-		log.Fatal(err)
+	for _, m := range migrators {
+		if err := m(db); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	log.Println("Migration completed successfully.")

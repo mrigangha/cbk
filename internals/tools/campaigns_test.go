@@ -54,9 +54,9 @@ func TestCreateCampaign_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := CreateCampaign(ctx, map[string]any{
@@ -92,9 +92,9 @@ func TestCreateCampaign_MetaError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	_, err := CreateCampaign(ctx, map[string]any{
@@ -132,9 +132,9 @@ func TestUpdateCampaign_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := UpdateCampaign(ctx, map[string]any{
@@ -184,9 +184,9 @@ func TestActivateCampaign_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := ActivateCampaign(ctx, map[string]any{
@@ -237,9 +237,9 @@ func TestDeleteCampaign_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := DeleteCampaign(ctx, map[string]any{"campaign_id": "555666"})
@@ -272,9 +272,9 @@ func TestListAdSets_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := ListAdSets(ctx, map[string]any{"campaign_id": "123456"})
@@ -306,9 +306,9 @@ func TestListAds_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := ListAds(ctx, map[string]any{"ad_set_id": "777"})
@@ -350,9 +350,9 @@ func TestGetCampaignInsights_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := GetCampaignInsights(ctx, map[string]any{
@@ -410,9 +410,9 @@ func TestCreateAdSet_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := CreateAdSet(ctx, map[string]any{
@@ -498,9 +498,9 @@ func TestCreateAdSet_ConversionsRequirePixel(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	result, err := CreateAdSet(ctx, map[string]any{
 		"name":              "Lead Gen",
@@ -542,9 +542,9 @@ func TestCreateAd_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := CreateAd(ctx, map[string]any{
@@ -573,9 +573,9 @@ func TestCompareCampaigns_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	old := graphBaseURL
-	graphBaseURL = ts.URL
-	defer func() { graphBaseURL = old }()
+	old := GraphBaseURL()
+	SetGraphBaseURL(ts.URL)
+	defer func() { SetGraphBaseURL(old) }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
 	result, err := CompareCampaigns(ctx, map[string]any{

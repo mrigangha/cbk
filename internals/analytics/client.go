@@ -1,12 +1,12 @@
 package analytics
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/mrigangha/cbk/internals/metaclient"
 )
 
 var graphBaseURL = "https://graph.facebook.com/v23.0"
@@ -19,49 +19,31 @@ func GraphBaseURL() string {
 // SetGraphBaseURL overrides the Meta Graph API base URL (tests).
 func SetGraphBaseURL(u string) {
 	graphBaseURL = u
+	metaclient.SetBaseURL(u)
 }
 
-// get fetches a Graph API path and decodes the JSON envelope.
+// get fetches a Graph API path through the shared metaclient so all
+// analytics traffic benefits from rate-limit protection.
 func get(
 	accessToken string,
 	path string,
 	query url.Values,
 ) (map[string]any, error) {
 
-	req, err := http.NewRequest(
-		http.MethodGet,
-		graphBaseURL+path,
-		nil,
+	var q map[string][]string
+	if query != nil {
+		q = query
+	}
+
+	out, status, err := metaclient.Request(
+		http.MethodGet, path, accessToken, q, nil,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	if query != nil {
-		req.URL.RawQuery = query.Encode()
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var out map[string]any
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, fmt.Errorf("invalid graph response: %w", err)
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		msg := fmt.Sprintf("meta error (%d)", resp.StatusCode)
+	if status != http.StatusOK {
+		msg := fmt.Sprintf("meta error (%d)", status)
 		if e, ok := out["error"].(map[string]any); ok {
 			if m, ok := e["message"].(string); ok {
 				msg = m

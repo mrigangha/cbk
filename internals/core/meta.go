@@ -3,10 +3,11 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/mrigangha/cbk/internals/metaclient"
 )
 
 type AdSetResponse struct {
@@ -69,27 +70,15 @@ func (a *Api) GetAdSets(w http.ResponseWriter, r *http.Request) {
 		campaignID,
 	)
 
-	req, err := http.NewRequest(http.MethodGet, graphURL, nil)
+	status, body, err := graphGet(graphURL, accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(map[string]string{
 			"error": "failed to fetch ad sets from Meta",
 		})
@@ -98,7 +87,7 @@ func (a *Api) GetAdSets(w http.ResponseWriter, r *http.Request) {
 
 	var result AdSetResponse
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -178,29 +167,17 @@ func (a *Api) GetCampaignInsights(w http.ResponseWriter, r *http.Request) {
 		campaignID,
 	)
 
-	req, err := http.NewRequest(http.MethodGet, graphURL, nil)
+	status, body, err := graphGet(graphURL, accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
+	w.WriteHeader(status)
 
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	if _, err := w.Write(body); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
 	}
 }
 
@@ -296,20 +273,26 @@ func (a *Api) MetaCallback(w http.ResponseWriter, r *http.Request) {
 		url.QueryEscape(req.Code),
 	)
 
-	resp, err := http.Get(tokenURL)
+	data, status, err := metaclient.Request(
+		http.MethodGet, tokenURL, "", nil, nil,
+	)
 	if err != nil {
 		http.Error(w, "failed to contact Meta", http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		http.Error(w, "failed to exchange code", http.StatusBadRequest)
 		return
 	}
 
 	var token TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+	if raw, merr := json.Marshal(data); merr == nil {
+		if err := json.Unmarshal(raw, &token); err != nil {
+			http.Error(w, "invalid token response", http.StatusInternalServerError)
+			return
+		}
+	} else {
 		http.Error(w, "invalid token response", http.StatusInternalServerError)
 		return
 	}
@@ -388,26 +371,14 @@ func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
 		adAccountID,
 	)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	status, body, err := graphGet(url, accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		http.Error(w, string(body), resp.StatusCode)
+	if status != http.StatusOK {
+		http.Error(w, string(body), status)
 		return
 	}
 
@@ -420,7 +391,7 @@ func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&campaigns); err != nil {
+	if err := json.Unmarshal(body, &campaigns); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -586,29 +557,17 @@ func (a *Api) GetAds(w http.ResponseWriter, r *http.Request) {
 		adSetID,
 	)
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	statusCode, bodyBytes, gerr := graphGet(url, accessToken)
+	if gerr != nil {
+		http.Error(w, gerr.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		http.Error(w, string(body), resp.StatusCode)
+	if statusCode != http.StatusOK {
+		http.Error(w, string(bodyBytes), statusCode)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	w.Write(bodyBytes)
 }

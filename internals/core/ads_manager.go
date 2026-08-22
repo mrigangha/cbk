@@ -69,34 +69,23 @@ func (a *Api) GetCampaignDetails(w http.ResponseWriter, r *http.Request) {
 		campaignID,
 	)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	status, body, err := graphGet(url, accessToken)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		var metaErr MetaErrorResponse
-		json.NewDecoder(resp.Body).Decode(&metaErr)
+		json.Unmarshal(body, &metaErr)
 
-		http.Error(w, metaErr.Error.Message, resp.StatusCode)
+		http.Error(w, metaErr.Error.Message, status)
 		return
 	}
 
 	var campaign CampaignDetailsResponse
 
-	if err := json.NewDecoder(resp.Body).Decode(&campaign); err != nil {
+	if err := json.Unmarshal(body, &campaign); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

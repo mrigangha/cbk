@@ -46,6 +46,7 @@ func TestContentRequest_IncludesNewTools(t *testing.T) {
 		// Intelligence
 		"get_analytics",
 		"get_recommendations",
+		"optimize_campaign",
 	}
 
 	if len(got) != len(expected) {
