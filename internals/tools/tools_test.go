@@ -124,6 +124,7 @@ func TestAllTools_Execute(t *testing.T) {
 		{"compare_campaigns", map[string]any{"campaign_ids": []any{"888", "999"}}},
 		// Intelligence
 		{"get_analytics", nil},
+		{"get_recommendations", nil},
 	}
 
 	registered := h.GetTools()

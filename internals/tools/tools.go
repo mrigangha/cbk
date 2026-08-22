@@ -608,6 +608,22 @@ func NewToolHandler() *ToolHandler {
 
 	RegisterAnalyticsTool(h)
 
+	h.RegisterTool(Tool{
+		Name:        "get_recommendations",
+		Description: "Runs the optimization decision engine over all campaigns and returns one concrete recommended action per campaign (PAUSE, DECREASE_BUDGET, INCREASE_BUDGET, REFRESH_CREATIVE or KEEP) with a confidence score, the reason, and the suggested budget/status change. Use this when the user asks what to do, what to optimize, or which campaigns to fix.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"date_preset": map[string]any{
+					"type":        "STRING",
+					"description": "Date window: last_7d, last_30d (default), this_month, etc.",
+				},
+			},
+			"required": []string{},
+		},
+		Handler: GetRecommendations,
+	})
+
 	return h
 }
 

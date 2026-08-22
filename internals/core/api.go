@@ -123,6 +123,19 @@ func NewApi() *Api {
 		r.Get("/trends", api.AnalyticsTrends)
 		r.Get("/anomalies", api.AnalyticsAnomalies)
 		r.Get("/compare", api.AnalyticsCompare)
+		r.Get("/recommendations", api.AnalyticsRecommendations)
+	})
+
+	// Optimization proposals: generate → review → approve/reject.
+	// Execution against the Meta API is intentionally NOT wired yet;
+	// approved actions wait for the executor milestone.
+	r.Route("/optimization", func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Post("/generate", api.GenerateOptimizationActions)
+		r.Get("/actions", api.ListOptimizationActions)
+		r.Post("/actions/{actionID}/approve", api.ApproveOptimizationAction)
+		r.Post("/actions/{actionID}/reject", api.RejectOptimizationAction)
 	})
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mrigangha/cbk/internals/analytics"
+	"github.com/mrigangha/cbk/internals/optimization"
 )
 
 // goalSnapshot maps a stored marketing goal into the neutral shape the
@@ -270,6 +271,24 @@ func (a *Api) AnalyticsAnomalies(w http.ResponseWriter, r *http.Request) {
 		"days_in_win": len(days),
 		"anomalies":   analytics.DetectAnomalies(days),
 	})
+}
+
+func (a *Api) AnalyticsRecommendations(w http.ResponseWriter, r *http.Request) {
+	actx, ok := a.resolveAnalyticsCtx(w, r)
+	if !ok {
+		return
+	}
+
+	report, err := analytics.BuildReport(
+		actx.token, actx.accountID, "", analytics.ScopeAccount,
+		actx.datePreset, actx.goal, true,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	a.writeJSONValue(w, optimization.OptimizeReport(report, actx.goal))
 }
 
 func (a *Api) AnalyticsCompare(w http.ResponseWriter, r *http.Request) {

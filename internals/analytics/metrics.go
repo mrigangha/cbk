@@ -171,7 +171,10 @@ func NormalizeInsight(row map[string]any) Metrics {
 // makes the intelligence functions safe on hand-built Metrics values.
 func DeriveRatios(m Metrics) Metrics {
 
-	m.Conversions = m.Purchases
+	// Never clobber an explicitly provided Conversions value.
+	if m.Conversions == 0 {
+		m.Conversions = m.Purchases
+	}
 	if m.Conversions == 0 {
 		m.Conversions = m.Leads
 	}
