@@ -49,6 +49,25 @@ type TraceEntry struct {
 	Decision     Decision      `json:"decision"`
 }
 
+// Event types emitted by the runtime while a run is in flight.
+const (
+	EventIteration   = "iteration"   // a new loop iteration started
+	EventThought     = "thought"     // model text alongside tool calls
+	EventPlan        = "plan"        // the working plan changed
+	EventAction      = "action"      // a tool call is about to execute
+	EventObservation = "observation" // a tool result came back
+)
+
+// Event is a progress notification streamed while the run executes.
+type Event struct {
+	Type        string       `json:"type"`
+	Iteration   int          `json:"iteration,omitempty"`
+	Thought     string       `json:"thought,omitempty"`
+	Plan        []PlanStep   `json:"plan,omitempty"`
+	Action      *Action      `json:"action,omitempty"`
+	Observation *Observation `json:"observation,omitempty"`
+}
+
 // RunResult is the outcome of a full agent run.
 type RunResult struct {
 	Status     string       `json:"status"` // completed | max_iterations_reached
@@ -108,7 +127,17 @@ type Runtime struct {
 	// Used to inject persistent context such as the active marketing goal.
 	ContextBlocks []string
 
+	// Events, when set, receives progress notifications during Run.
+	// It is invoked synchronously on the caller's goroutine.
+	Events func(Event)
+
 	plan []PlanStep
+}
+
+func (r *Runtime) emit(e Event) {
+	if r.Events != nil {
+		r.Events(e)
+	}
 }
 
 func NewRuntime(
@@ -183,6 +212,12 @@ func (r *Runtime) Run(goal string, history []tools.Message) (*RunResult, error) 
 
 		entry.Decision = Decision{Type: "act"}
 
+		r.emit(Event{
+			Type:      EventIteration,
+			Iteration: i,
+			Thought:   thought,
+		})
+
 		// Echo the full model turn back (preserves thought signatures).
 		modelParts := make([]tools.Part, 0, len(parts))
 		for _, part := range parts {
@@ -201,6 +236,12 @@ func (r *Runtime) Run(goal string, history []tools.Message) (*RunResult, error) 
 			action := Action{Tool: call.Name, Args: call.Args}
 			entry.Actions = append(entry.Actions, action)
 
+			r.emit(Event{
+				Type:      EventAction,
+				Iteration: i,
+				Action:    &action,
+			})
+
 			var obs Observation
 
 			if call.Name == planToolName {
@@ -215,6 +256,12 @@ func (r *Runtime) Run(goal string, history []tools.Message) (*RunResult, error) 
 			}
 
 			entry.Observations = append(entry.Observations, obs)
+
+			r.emit(Event{
+				Type:        EventObservation,
+				Iteration:   i,
+				Observation: &obs,
+			})
 
 			payload := map[string]any{}
 			if obs.Error != "" {
@@ -285,16 +332,21 @@ func (r *Runtime) applyPlan(args map[string]any) Observation {
 		})
 	}
 
-	if len(plan) == 0 {
-		return Observation{
-			Tool:  planToolName,
-			Error: "no valid steps provided",
+		if len(plan) == 0 {
+			return Observation{
+				Tool:  planToolName,
+				Error: "no valid steps provided",
+			}
 		}
-	}
 
-	r.plan = plan
+		r.plan = plan
 
-	return Observation{
+		r.emit(Event{
+			Type: EventPlan,
+			Plan: append([]PlanStep{}, plan...),
+		})
+
+		return Observation{
 		Tool: planToolName,
 		Result: map[string]any{
 			"plan_updated": true,

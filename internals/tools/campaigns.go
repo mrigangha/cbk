@@ -75,11 +75,49 @@ func metaRequest(
 
 	if resp.StatusCode != http.StatusOK {
 		msg := fmt.Sprintf("meta error (%d)", resp.StatusCode)
+
 		if metaErr, ok := result["error"].(map[string]any); ok {
-			if m, ok := metaErr["message"].(string); ok {
-				msg = m
+
+			base := msg
+			if m, ok := metaErr["message"].(string); ok && m != "" {
+				base = m
+			}
+
+			extras := []string{}
+
+			// Human-readable hints Meta often includes.
+			if u, ok := metaErr["error_user_msg"].(string); ok && u != "" {
+				extras = append(extras, u)
+			}
+			if ti, ok := metaErr["error_user_title"].(string); ok && ti != "" {
+				extras = append(extras, ti)
+			}
+
+			// Points at the exact offending request field(s).
+			if ed, ok := metaErr["error_data"].(map[string]any); ok {
+				if blame, ok := ed["blame_field_specs"].([]any); ok && len(blame) > 0 {
+					if b, err := json.Marshal(blame); err == nil {
+						extras = append(extras,
+							"invalid field: "+string(b))
+					}
+				}
+			}
+
+			if c, ok := metaErr["code"].(float64); ok {
+				codes := fmt.Sprintf("(code %d", int(c))
+				if sc, ok := metaErr["error_subcode"].(float64); ok {
+					codes += fmt.Sprintf(", subcode %d", int(sc))
+				}
+				codes += ")"
+				base = base + " " + codes
+			}
+
+			msg = base
+			if len(extras) > 0 {
+				msg = base + "; " + strings.Join(extras, "; ")
 			}
 		}
+
 		return nil, fmt.Errorf("%s", msg)
 	}
 
@@ -394,6 +432,70 @@ func GetAdSet(
 	)
 }
 
+// validGoalBillingPairs lists optimization goals we can pre-validate,
+// with the billing events Meta allows for each.
+var validGoalBillingPairs = map[string][]string{
+	"REACH":                {"IMPRESSIONS"},
+	"IMPRESSIONS":          {"IMPRESSIONS"},
+	"LINK_CLICKS":          {"LINK_CLICKS"},
+	"POST_ENGAGEMENT":      {"POST_ENGAGEMENT"},
+	"OFFSITE_CONVERSIONS":  {"IMPRESSIONS", "LINK_CLICKS"},
+	"QUALITY_LEAD":         {"IMPRESSIONS", "LINK_CLICKS"},
+	"VALUE":                {"IMPRESSIONS", "LINK_CLICKS"},
+	"THRUPLAY":             {"IMPRESSIONS"},
+}
+
+// goalsRequiringPromotedObject need a promoted_object (e.g. a Meta Pixel)
+// on the ad set; without it the API rejects with a vague
+// "Invalid parameter".
+var goalsRequiringPromotedObject = map[string]bool{
+	"OFFSITE_CONVERSIONS": true,
+	"QUALITY_LEAD":        true,
+	"VALUE":               true,
+}
+
+// validateAdSetGoal catches the common misconfigurations locally so the
+// agent gets an actionable error instead of burning iterations on the API.
+func validateAdSetGoal(
+	optimizationGoal string,
+	billingEvent string,
+	promotedObject map[string]any,
+) error {
+
+	goal := strings.ToUpper(optimizationGoal)
+
+	if allowed, known := validGoalBillingPairs[goal]; known {
+		if !containsFold(allowed, billingEvent) {
+			return fmt.Errorf(
+				"optimization_goal %s requires billing_event %s (got %s)",
+				goal,
+				strings.Join(allowed, " or "),
+				billingEvent,
+			)
+		}
+	}
+
+	if goalsRequiringPromotedObject[goal] && len(promotedObject) == 0 {
+		return fmt.Errorf(
+			"optimization_goal %s requires a promoted_object "+
+				"(e.g. {\"pixel_id\": \"<your meta pixel id>\"}); "+
+				"alternatively pick a goal like REACH or LINK_CLICKS that needs no pixel",
+			goal,
+		)
+	}
+
+	return nil
+}
+
+func containsFold(list []string, s string) bool {
+	for _, item := range list {
+		if strings.EqualFold(item, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // CreateAdSet creates a new ad set under a campaign.
 func CreateAdSet(
 	ctx ToolContext,
@@ -435,12 +537,26 @@ func CreateAdSet(
 		return nil, fmt.Errorf("one of daily_budget or lifetime_budget is required")
 	}
 
+	promotedObject, _ := args["promoted_object"].(map[string]any)
+
+	if err := validateAdSetGoal(
+		optimizationGoal,
+		billingEvent,
+		promotedObject,
+	); err != nil {
+		return nil, err
+	}
+
 	body := map[string]any{
 		"name":              name,
 		"campaign_id":       campaignID,
 		"optimization_goal": optimizationGoal,
 		"billing_event":     billingEvent,
 		"status":            "PAUSED",
+	}
+
+	if promotedObject != nil {
+		body["promoted_object"] = promotedObject
 	}
 
 	if hasDaily {

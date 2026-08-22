@@ -225,7 +225,7 @@ func NewToolHandler() *ToolHandler {
 
 	h.RegisterTool(Tool{
 		Name:        "create_adset",
-		Description: "Creates a new ad set under a campaign. Requires name, campaign_id, optimization_goal (e.g. REACH, LINK_CLICKS, OFFSITE_CONVERSIONS), billing_event (IMPRESSIONS, LINK_CLICKS) and one of daily_budget or lifetime_budget in minor units. Targeting is an object like {\"geo_locations\":{\"countries\":[\"US\"]},\"age_min\":18}.",
+		Description: "Creates a new ad set under a campaign. Requires name, campaign_id, optimization_goal, billing_event, one of daily_budget or lifetime_budget (minor units), and targeting like {\"geo_locations\":{\"countries\":[\"US\"]},\"age_min\":18}. Constraints: billing_event must pair with optimization_goal (REACH->IMPRESSIONS, LINK_CLICKS->LINK_CLICKS, POST_ENGAGEMENT->POST_ENGAGEMENT; OFFSITE_CONVERSIONS/QUALITY_LEAD/VALUE allow IMPRESSIONS or LINK_CLICKS). The optimization_goal must be allowed by the parent campaign's objective (e.g. an OUTCOME_LEADS campaign does not accept LINK_CLICKS). OFFSITE_CONVERSIONS, QUALITY_LEAD and VALUE additionally require promoted_object with a Meta pixel id.",
 		Parameters: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
@@ -255,11 +255,15 @@ func NewToolHandler() *ToolHandler {
 				},
 				"optimization_goal": map[string]any{
 					"type":        "STRING",
-					"description": "e.g. REACH, IMPRESSIONS, LINK_CLICKS, POST_ENGAGEMENT, OFFSITE_CONVERSIONS, VALUE.",
+					"description": "e.g. REACH, IMPRESSIONS, LINK_CLICKS, POST_ENGAGEMENT, THRUPLAY, OFFSITE_CONVERSIONS, QUALITY_LEAD, VALUE.",
 				},
 				"billing_event": map[string]any{
 					"type":        "STRING",
-					"description": "IMPRESSIONS or LINK_CLICKS (must align with optimization_goal).",
+					"description": "IMPRESSIONS, LINK_CLICKS or POST_ENGAGEMENT — must be valid for the chosen optimization_goal.",
+				},
+				"promoted_object": map[string]any{
+					"type":        "OBJECT",
+					"description": "Required for OFFSITE_CONVERSIONS/QUALITY_LEAD/VALUE. E.g. {\"pixel_id\":\"123\"} or {\"page_id\":\"123\"}.",
 				},
 				"bid_strategy": map[string]any{
 					"type":        "STRING",

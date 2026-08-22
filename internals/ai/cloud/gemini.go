@@ -25,7 +25,21 @@ type InteractionResponse struct {
 	} `json:"steps"`
 }
 
-func (p *Provider) GenerateText(prompt string) (string, error) {
+type geminiProvider struct {
+	apiKey  string
+	model   string
+	baseURL string
+}
+
+func newGeminiProvider(apiKey, model, baseURL string) *geminiProvider {
+	return &geminiProvider{
+		apiKey:  apiKey,
+		model:   model,
+		baseURL: baseURL,
+	}
+}
+
+func (p *geminiProvider) GenerateText(prompt string) (string, error) {
 	reqBody := InteractionRequest{
 		Model: p.model,
 		Input: prompt,
@@ -86,7 +100,7 @@ func (p *Provider) GenerateText(prompt string) (string, error) {
 	return "", fmt.Errorf("no model output found in response")
 }
 
-func (p *Provider) Chat(
+func (p *geminiProvider) Chat(
 	req tools.GenerateContentRequest,
 ) (*tools.GenerateContentResponse, error) {
 

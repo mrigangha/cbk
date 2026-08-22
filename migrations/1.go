@@ -59,5 +59,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := migrateV6(db); err != nil {
+		log.Fatal(err)
+	}
+
 	log.Println("Migration completed successfully.")
 }

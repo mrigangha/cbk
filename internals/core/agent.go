@@ -141,13 +141,30 @@ func flattenTrace(trace []agent.TraceEntry) []AgentStep {
 	return steps
 }
 
-func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
+// agentRun carries everything both handlers (REST + SSE) need to run
+// the agent after the shared setup has succeeded.
+type agentRun struct {
+	Runtime    *agent.Runtime
+	SessionID  int64
+	ActiveGoal *MarketingGoal
+	ModelName  string
+	Prompt     string
+}
+
+// prepareAgentRun performs the shared setup: request decoding, auth,
+// provider/meta credential lookup, goal resolution, session handling
+// and user-message persistence. On failure it writes the HTTP error
+// itself and returns nil.
+func (a *Api) prepareAgentRun(
+	w http.ResponseWriter,
+	r *http.Request,
+) (*AgentRequest, *agentRun, bool) {
 
 	var agentReq AgentRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&agentReq); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+		return nil, nil, false
 	}
 
 	if agentReq.Prompt == "" {
@@ -156,42 +173,42 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 
 	if agentReq.ModelName == "" || agentReq.Prompt == "" {
 		http.Error(w, "model_name and prompt required", http.StatusBadRequest)
-		return
+		return nil, nil, false
 	}
 
 	user := a.GetUser(r)
 	if user == nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+		return nil, nil, false
 	}
 
 	user, err := a.GetUserByEmail(user.Email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, nil, false
 	}
 
-	// Gemini API key for the requested model.
+	// AI provider credentials for the requested model.
 	var apiKey string
-	var modelName string
+	var modelType string
 
 	err = a.db.QueryRow(`
-		SELECT provider_name, api_key
+		SELECT api_key, COALESCE(provider_type, 'GEMINI')
 		FROM providers
 		WHERE user_id = ?
 		AND provider_name = ?
 	`,
 		user.ID,
 		agentReq.ModelName,
-	).Scan(&modelName, &apiKey)
+	).Scan(&apiKey, &modelType)
 
 	if err == sql.ErrNoRows {
 		http.Error(w, "provider not found", http.StatusNotFound)
-		return
+		return nil, nil, false
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, nil, false
 	}
 
 	// Meta access token and default ad account for the user.
@@ -209,7 +226,7 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, "no connected Meta Ads account", http.StatusBadRequest)
-		return
+		return nil, nil, false
 	}
 
 	// Resolve or create the chat session for history.
@@ -223,7 +240,7 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil || ownerID != user.ID {
 			http.Error(w, "session not found", http.StatusNotFound)
-			return
+			return nil, nil, false
 		}
 	} else {
 		title := agentReq.Prompt
@@ -238,7 +255,7 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 		`, user.ID, title)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return nil, nil, false
 		}
 
 		sessionID, _ = res.LastInsertId()
@@ -249,20 +266,20 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 	var activeGoal *MarketingGoal
 
 	if agentReq.GoalID > 0 {
-		goal, err := a.getOwnedGoal(r, agentReq.GoalID)
-		if err != nil {
+		goal, gerr := a.getOwnedGoal(r, agentReq.GoalID)
+		if gerr != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+			return nil, nil, false
 		}
 		if goal == nil {
 			http.Error(w, "goal not found", http.StatusNotFound)
-			return
+			return nil, nil, false
 		}
 		if goal.Status != "ACTIVE" {
 			http.Error(w,
 				"goal is "+strings.ToLower(goal.Status)+", only ACTIVE goals can drive runs",
 				http.StatusBadRequest)
-			return
+			return nil, nil, false
 		}
 		activeGoal = goal
 
@@ -291,15 +308,14 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 	`, sessionID, agentReq.Prompt)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, nil, false
 	}
 
-	// Run the agent.
-	provider := cloud.NewProvider(
-		apiKey,
-		agentReq.ModelName,
-		"https://generativelanguage.googleapis.com/v1beta",
-	)
+	provider, perr := cloud.New(modelType, apiKey, agentReq.ModelName)
+	if perr != nil {
+		http.Error(w, perr.Error(), http.StatusBadRequest)
+		return nil, nil, false
+	}
 
 	runtime := agent.NewRuntime(
 		provider,
@@ -314,11 +330,20 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 		runtime.ContextBlocks = append(runtime.ContextBlocks, goalContextBlock(activeGoal))
 	}
 
-	result, err := runtime.Run(agentReq.Prompt, agentReq.Messages)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	return &agentReq, &agentRun{
+		Runtime:    runtime,
+		SessionID:  sessionID,
+		ActiveGoal: activeGoal,
+		ModelName:  agentReq.ModelName,
+		Prompt:     agentReq.Prompt,
+	}, true
+}
+
+func (a *Api) finishAgentRun(
+	w http.ResponseWriter,
+	run *agentRun,
+	result *agent.RunResult,
+) {
 
 	steps := flattenTrace(result.Trace)
 
@@ -326,32 +351,31 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 	stepsJSON, _ := json.Marshal(steps)
 	traceJSON, _ := json.Marshal(result.Trace)
 
-	_, err = a.db.Exec(`
+	_, err := a.db.Exec(`
 		INSERT INTO agent_messages (session_id, role, content, steps, trace, model_name)
 		VALUES (?, 'assistant', ?, ?, ?, ?)
-	`, sessionID, result.Response, string(stepsJSON), string(traceJSON), agentReq.ModelName)
+	`, run.SessionID, result.Response, string(stepsJSON), string(traceJSON), run.ModelName)
 
 	if err == nil {
 		a.db.Exec(`
 			UPDATE agent_sessions
 			SET updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?
-		`, sessionID)
+		`, run.SessionID)
 	}
 
 	var goalSummary *GoalSummary
-	if activeGoal != nil {
+	if run.ActiveGoal != nil {
 		goalSummary = &GoalSummary{
-			ID:        activeGoal.ID,
-			Name:      activeGoal.Name,
-			Objective: activeGoal.Objective,
-			Status:    activeGoal.Status,
+			ID:        run.ActiveGoal.ID,
+			Name:      run.ActiveGoal.Name,
+			Objective: run.ActiveGoal.Objective,
+			Status:    run.ActiveGoal.Status,
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(AgentResponse{
-		SessionID:  sessionID,
+	resp := AgentResponse{
+		SessionID:  run.SessionID,
 		Status:     result.Status,
 		Iterations: result.Iterations,
 		Response:   result.Response,
@@ -360,5 +384,74 @@ func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
 		Steps:      steps,
 		Trace:      result.Trace,
 		GoalRef:    goalSummary,
-	})
+	}
+
+	if _, ok := w.(http.Flusher); ok && w.Header().Get("Content-Type") == "text/event-stream" {
+		writeSSE(w, map[string]any{"type": "final", "data": resp})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func writeSSE(w http.ResponseWriter, payload any) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (a *Api) RunAgentChat(w http.ResponseWriter, r *http.Request) {
+
+	agentReq, run, ok := a.prepareAgentRun(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := run.Runtime.Run(agentReq.Prompt, agentReq.Messages)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	a.finishAgentRun(w, run, result)
+}
+
+// RunAgentChatStream streams progress events as server-sent events:
+// iteration markers, plan updates, actions and observations live, and
+// a final event carrying the complete response payload.
+func (a *Api) RunAgentChatStream(w http.ResponseWriter, r *http.Request) {
+
+	agentReq, run, ok := a.prepareAgentRun(w, r)
+	if !ok {
+		return
+	}
+
+	flusher, canFlush := w.(http.Flusher)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if canFlush {
+		flusher.Flush()
+	}
+
+	run.Runtime.Events = func(e agent.Event) {
+		writeSSE(w, e)
+	}
+
+	result, err := run.Runtime.Run(agentReq.Prompt, agentReq.Messages)
+	if err != nil {
+		writeSSE(w, map[string]any{"type": "error", "error": err.Error()})
+		return
+	}
+
+	a.finishAgentRun(w, run, result)
 }

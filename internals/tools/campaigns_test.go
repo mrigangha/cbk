@@ -390,8 +390,8 @@ func TestCreateAdSet_Success(t *testing.T) {
 		if payload["campaign_id"] != "555" {
 			t.Errorf("expected campaign_id 555, got %v", payload["campaign_id"])
 		}
-		if payload["optimization_goal"] != "LINK_CLICKS" {
-			t.Errorf("expected optimization_goal LINK_CLICKS, got %v", payload["optimization_goal"])
+		if payload["optimization_goal"] != "REACH" {
+			t.Errorf("expected optimization_goal REACH, got %v", payload["optimization_goal"])
 		}
 		if payload["billing_event"] != "IMPRESSIONS" {
 			t.Errorf("expected billing_event IMPRESSIONS, got %v", payload["billing_event"])
@@ -418,7 +418,7 @@ func TestCreateAdSet_Success(t *testing.T) {
 	result, err := CreateAdSet(ctx, map[string]any{
 		"name":              "Retargeting",
 		"campaign_id":       "555",
-		"optimization_goal": "LINK_CLICKS",
+		"optimization_goal": "REACH",
 		"billing_event":     "IMPRESSIONS",
 		"daily_budget":      "2000",
 		"targeting": map[string]any{
@@ -447,6 +447,74 @@ func TestCreateAdSet_MissingBudget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "daily_budget or lifetime_budget") {
 		t.Errorf("expected missing budget error, got %q", err.Error())
+	}
+}
+
+func TestCreateAdSet_GoalBillingMismatch(t *testing.T) {
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	_, err := CreateAdSet(ctx, map[string]any{
+		"name":              "Retargeting",
+		"campaign_id":       "555",
+		"optimization_goal": "LINK_CLICKS",
+		"billing_event":     "IMPRESSIONS",
+		"daily_budget":      "5000",
+	})
+	if err == nil {
+		t.Fatal("expected goal/billing mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires billing_event LINK_CLICKS") {
+		t.Errorf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestCreateAdSet_ConversionsRequirePixel(t *testing.T) {
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	_, err := CreateAdSet(ctx, map[string]any{
+		"name":              "Lead Gen",
+		"campaign_id":       "52520594836706",
+		"optimization_goal": "OFFSITE_CONVERSIONS",
+		"billing_event":     "IMPRESSIONS",
+		"daily_budget":      "50000",
+	})
+	if err == nil {
+		t.Fatal("expected missing promoted_object error, got nil")
+	}
+	if !strings.Contains(err.Error(), "promoted_object") {
+		t.Errorf("unexpected error: %q", err.Error())
+	}
+
+	// With a pixel the request must go through including promoted_object.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("invalid JSON body: %v", err)
+		}
+		po, ok := payload["promoted_object"].(map[string]any)
+		if !ok || po["pixel_id"] != "999" {
+			t.Errorf("expected promoted_object with pixel_id 999, got %v", payload["promoted_object"])
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": "new-adset"})
+	}))
+	defer ts.Close()
+
+	old := graphBaseURL
+	graphBaseURL = ts.URL
+	defer func() { graphBaseURL = old }()
+
+	result, err := CreateAdSet(ctx, map[string]any{
+		"name":              "Lead Gen",
+		"campaign_id":       "52520594836706",
+		"optimization_goal": "OFFSITE_CONVERSIONS",
+		"billing_event":     "IMPRESSIONS",
+		"daily_budget":      "50000",
+		"promoted_object":   map[string]any{"pixel_id": "999"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAdSet returned error: %v", err)
+	}
+	if res, ok := result.(map[string]any); !ok || res["id"] != "new-adset" {
+		t.Errorf("expected id new-adset, got %v", result)
 	}
 }
 

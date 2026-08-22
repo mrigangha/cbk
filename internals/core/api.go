@@ -3,7 +3,6 @@ package core
 import (
 	"database/sql"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -54,10 +53,11 @@ func NewApi() *Api {
 
 		MaxAge: 300,
 	}))
-	// Middleware for logging, recovery, and timeouts
+	// Middleware for logging and recovery.
+	// NOTE: no global Timeout — agent runs and SSE streams are long-lived;
+	// the client aborting the request is the cancellation signal.
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
 	// Basic route
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Welcome"))
@@ -86,6 +86,8 @@ func NewApi() *Api {
 	})
 
 	r.With(AuthMiddleware).Post("/agent/chat", api.RunAgentChat)
+	// Streaming variant: server-sent events with live progress.
+	r.With(AuthMiddleware).Post("/agent/chat/stream", api.RunAgentChatStream)
 	// Deprecated alias kept for older clients.
 	r.With(AuthMiddleware).Post("/test", api.RunAgentChat)
 
@@ -124,6 +126,7 @@ func NewApi() *Api {
 
 		r.Post("/providers", api.CreateProvider)
 		r.Get("/providers", api.ListProviders)
+		r.Delete("/providers/{providerID}", api.DeleteProvider)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware)
