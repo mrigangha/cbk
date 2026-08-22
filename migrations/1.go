@@ -51,5 +51,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := migrateV4(db); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := migrateV5(db); err != nil {
+		log.Fatal(err)
+	}
+
 	log.Println("Migration completed successfully.")
 }

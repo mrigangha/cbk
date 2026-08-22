@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -163,7 +164,7 @@ func TestUpdateCampaign_NoUpdatableFields(t *testing.T) {
 	}
 }
 
-func TestUpdateCampaignStatus_Success(t *testing.T) {
+func TestActivateCampaign_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -188,24 +189,31 @@ func TestUpdateCampaignStatus_Success(t *testing.T) {
 	defer func() { graphBaseURL = old }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
-	result, err := UpdateCampaignStatus(ctx, map[string]any{
+	result, err := ActivateCampaign(ctx, map[string]any{
 		"campaign_id": "123456",
-		"status":      "active",
 	})
 	if err != nil {
-		t.Fatalf("UpdateCampaignStatus returned error: %v", err)
+		t.Fatalf("ActivateCampaign returned error: %v", err)
 	}
 	if res, ok := result.(map[string]any); !ok || res["success"] != true {
 		t.Errorf("expected success true, got %v", result)
 	}
 }
 
-func TestUpdateCampaignStatus_InvalidStatus(t *testing.T) {
+func TestPauseCampaign_MissingID(t *testing.T) {
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
-	_, err := UpdateCampaignStatus(ctx, map[string]any{
-		"campaign_id": "123456",
-		"status":      "DELETED",
-	})
+	_, err := PauseCampaign(ctx, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing campaign_id, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing campaign_id") {
+		t.Errorf("expected missing campaign_id error, got %q", err.Error())
+	}
+}
+
+func TestSetEntityStatus_InvalidStatus(t *testing.T) {
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	_, err := setEntityStatus(ctx, "123456", "DELETED")
 	if err == nil {
 		t.Fatal("expected error for invalid status, got nil")
 	}
@@ -243,7 +251,7 @@ func TestDeleteCampaign_Success(t *testing.T) {
 	}
 }
 
-func TestGetAdSets_Success(t *testing.T) {
+func TestListAdSets_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
@@ -269,9 +277,9 @@ func TestGetAdSets_Success(t *testing.T) {
 	defer func() { graphBaseURL = old }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
-	result, err := GetAdSets(ctx, map[string]any{"campaign_id": "123456"})
+	result, err := ListAdSets(ctx, map[string]any{"campaign_id": "123456"})
 	if err != nil {
-		t.Fatalf("GetAdSets returned error: %v", err)
+		t.Fatalf("ListAdSets returned error: %v", err)
 	}
 	data, ok := result.([]any)
 	if !ok {
@@ -282,7 +290,7 @@ func TestGetAdSets_Success(t *testing.T) {
 	}
 }
 
-func TestGetAds_Success(t *testing.T) {
+func TestListAds_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
@@ -303,9 +311,9 @@ func TestGetAds_Success(t *testing.T) {
 	defer func() { graphBaseURL = old }()
 
 	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
-	result, err := GetAds(ctx, map[string]any{"ad_set_id": "777"})
+	result, err := ListAds(ctx, map[string]any{"ad_set_id": "777"})
 	if err != nil {
-		t.Fatalf("GetAds returned error: %v", err)
+		t.Fatalf("ListAds returned error: %v", err)
 	}
 	data, ok := result.([]any)
 	if !ok {
@@ -360,6 +368,182 @@ func TestGetCampaignInsights_Success(t *testing.T) {
 	}
 	if len(data) != 1 {
 		t.Errorf("expected 1 insight row, got %d", len(data))
+	}
+}
+
+func TestCreateAdSet_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/act_123/adsets" {
+			t.Errorf("expected path /act_123/adsets, got %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("invalid JSON body: %v", err)
+		}
+		if payload["name"] != "Retargeting" {
+			t.Errorf("expected name Retargeting, got %v", payload["name"])
+		}
+		if payload["campaign_id"] != "555" {
+			t.Errorf("expected campaign_id 555, got %v", payload["campaign_id"])
+		}
+		if payload["optimization_goal"] != "LINK_CLICKS" {
+			t.Errorf("expected optimization_goal LINK_CLICKS, got %v", payload["optimization_goal"])
+		}
+		if payload["billing_event"] != "IMPRESSIONS" {
+			t.Errorf("expected billing_event IMPRESSIONS, got %v", payload["billing_event"])
+		}
+		if payload["daily_budget"] != "2000" {
+			t.Errorf("expected daily_budget 2000, got %v", payload["daily_budget"])
+		}
+		targeting, ok := payload["targeting"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected targeting object, got %T", payload["targeting"])
+		}
+		if targeting["age_min"] != float64(18) {
+			t.Errorf("expected age_min 18, got %v", targeting["age_min"])
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": "777888"})
+	}))
+	defer ts.Close()
+
+	old := graphBaseURL
+	graphBaseURL = ts.URL
+	defer func() { graphBaseURL = old }()
+
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	result, err := CreateAdSet(ctx, map[string]any{
+		"name":              "Retargeting",
+		"campaign_id":       "555",
+		"optimization_goal": "LINK_CLICKS",
+		"billing_event":     "IMPRESSIONS",
+		"daily_budget":      "2000",
+		"targeting": map[string]any{
+			"geo_locations": map[string]any{"countries": []any{"US"}},
+			"age_min":       18,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateAdSet returned error: %v", err)
+	}
+	if res, ok := result.(map[string]any); !ok || res["id"] != "777888" {
+		t.Errorf("expected id 777888, got %v", result)
+	}
+}
+
+func TestCreateAdSet_MissingBudget(t *testing.T) {
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	_, err := CreateAdSet(ctx, map[string]any{
+		"name":              "Retargeting",
+		"campaign_id":       "555",
+		"optimization_goal": "LINK_CLICKS",
+		"billing_event":     "IMPRESSIONS",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing budget, got nil")
+	}
+	if !strings.Contains(err.Error(), "daily_budget or lifetime_budget") {
+		t.Errorf("expected missing budget error, got %q", err.Error())
+	}
+}
+
+func TestCreateAd_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/act_123/ads" {
+			t.Errorf("expected path /act_123/ads, got %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("invalid JSON body: %v", err)
+		}
+		if payload["adset_id"] != "777" {
+			t.Errorf("expected adset_id 777, got %v", payload["adset_id"])
+		}
+		creative, ok := payload["creative"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected creative object, got %T", payload["creative"])
+		}
+		if creative["creative_id"] != "999" {
+			t.Errorf("expected creative_id 999, got %v", creative["creative_id"])
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": "111222"})
+	}))
+	defer ts.Close()
+
+	old := graphBaseURL
+	graphBaseURL = ts.URL
+	defer func() { graphBaseURL = old }()
+
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	result, err := CreateAd(ctx, map[string]any{
+		"name":        "Summer Creative",
+		"ad_set_id":   "777",
+		"creative_id": "999",
+	})
+	if err != nil {
+		t.Fatalf("CreateAd returned error: %v", err)
+	}
+	if res, ok := result.(map[string]any); !ok || res["id"] != "111222" {
+		t.Errorf("expected id 111222, got %v", result)
+	}
+}
+
+func TestCompareCampaigns_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/insights") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": []any{
+				map[string]any{"spend": "10.00"},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	old := graphBaseURL
+	graphBaseURL = ts.URL
+	defer func() { graphBaseURL = old }()
+
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	result, err := CompareCampaigns(ctx, map[string]any{
+		"campaign_ids": []any{"888", "999"},
+	})
+	if err != nil {
+		t.Fatalf("CompareCampaigns returned error: %v", err)
+	}
+	rows, ok := result.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any result, got %T", result)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 comparison rows, got %d", len(rows))
+	}
+	if rows[0]["campaign_id"] != "888" || rows[1]["campaign_id"] != "999" {
+		t.Errorf("unexpected campaign ids: %v %v", rows[0]["campaign_id"], rows[1]["campaign_id"])
+	}
+	if _, hasErr := rows[0]["error"]; hasErr {
+		t.Errorf("unexpected error in first row: %v", rows[0]["error"])
+	}
+}
+
+func TestCompareCampaigns_TooMany(t *testing.T) {
+	ids := make([]any, 11)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%d", i)
+	}
+
+	ctx := ToolContext{AccessToken: "test-token", AdAccountID: "123"}
+	_, err := CompareCampaigns(ctx, map[string]any{"campaign_ids": ids})
+	if err == nil {
+		t.Fatal("expected error for too many campaign_ids, got nil")
+	}
+	if !strings.Contains(err.Error(), "maximum is 10") {
+		t.Errorf("expected maximum error, got %q", err.Error())
 	}
 }
 

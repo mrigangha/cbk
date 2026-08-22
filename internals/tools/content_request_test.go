@@ -14,15 +14,39 @@ func TestContentRequest_IncludesNewTools(t *testing.T) {
 	}
 
 	expected := []string{
-		"get_campaigns",
-		"get_campaign_details",
+		// Campaigns
+		"list_campaigns",
+		"get_campaign",
 		"create_campaign",
 		"update_campaign",
-		"update_campaign_status",
 		"delete_campaign",
-		"get_adsets",
-		"get_ads",
+		"activate_campaign",
+		"pause_campaign",
+		// Ad sets
+		"list_adsets",
+		"get_adset",
+		"create_adset",
+		"update_adset",
+		"delete_adset",
+		"activate_adset",
+		"pause_adset",
+		// Ads
+		"list_ads",
+		"get_ad",
+		"create_ad",
+		"update_ad",
+		"delete_ad",
+		"activate_ad",
+		"pause_ad",
+		// Insights
 		"get_campaign_insights",
+		"get_adset_insights",
+		"get_ad_insights",
+		"compare_campaigns",
+	}
+
+	if len(got) != len(expected) {
+		t.Fatalf("registered %d tools, want %d", len(got), len(expected))
 	}
 
 	for _, name := range expected {
@@ -51,5 +75,15 @@ func TestContentRequest_IncludesNewTools(t *testing.T) {
 		create.Parameters.Required[0] != "name" ||
 		create.Parameters.Required[1] != "objective" {
 		t.Fatalf("create_campaign required = %v, want [name objective]", create.Parameters.Required)
+	}
+
+	// compare_campaigns must carry the ARRAY items schema for campaign_ids
+	compare := got["compare_campaigns"]
+	prop, ok = compare.Parameters.Properties["campaign_ids"]
+	if !ok {
+		t.Fatal("compare_campaigns missing campaign_ids property")
+	}
+	if prop.Type != "ARRAY" || prop.Items == nil || prop.Items.Type != "STRING" {
+		t.Fatalf("campaign_ids schema invalid: %+v", prop)
 	}
 }

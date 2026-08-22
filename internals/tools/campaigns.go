@@ -12,6 +12,12 @@ import (
 
 var graphBaseURL = "https://graph.facebook.com/v23.0"
 
+// SetGraphBaseURL overrides the Meta Graph API base URL.
+// Used by tests to point handlers at a mock server.
+func SetGraphBaseURL(url string) {
+	graphBaseURL = url
+}
+
 func metaRequest(
 	method string,
 	path string,
@@ -80,13 +86,71 @@ func metaRequest(
 	return result, nil
 }
 
-// CreateCampaign creates a new campaign for the connected ad account.
-func CreateCampaign(
+// ===========================
+// ARG HELPERS
+// ===========================
+
+func argString(args map[string]any, key string) (string, bool) {
+	v, ok := args[key].(string)
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+func requireString(args map[string]any, key string) (string, error) {
+	v, ok := argString(args, key)
+	if !ok {
+		return "", fmt.Errorf("missing %s", key)
+	}
+	return v, nil
+}
+
+func extractData(result map[string]any) any {
+	if data, ok := result["data"].([]any); ok {
+		return data
+	}
+	return result
+}
+
+// setEntityStatus sets ACTIVE/PAUSED/ARCHIVED on any campaign/ad set/ad object.
+func setEntityStatus(
+	ctx ToolContext,
+	objectID string,
+	status string,
+) (any, error) {
+
+	status = strings.ToUpper(status)
+
+	switch status {
+	case "ACTIVE", "PAUSED", "ARCHIVED":
+	default:
+		return nil, fmt.Errorf(
+			"invalid status %q, must be ACTIVE, PAUSED or ARCHIVED",
+			status,
+		)
+	}
+
+	return metaRequest(
+		http.MethodPost,
+		"/"+objectID,
+		ctx.AccessToken,
+		nil,
+		map[string]any{"status": status},
+	)
+}
+
+// ===========================
+// CAMPAIGNS
+// ===========================
+
+// ListCampaigns returns all campaigns for the connected ad account.
+func ListCampaigns(
 	ctx ToolContext,
 	args map[string]any,
 ) (any, error) {
 
-	adAccountID, ok := args["ad_account_id"].(string)
+	adAccountID, ok := argString(args, "ad_account_id")
 	if !ok {
 		adAccountID = ctx.AdAccountID
 	}
@@ -94,14 +158,68 @@ func CreateCampaign(
 		return nil, fmt.Errorf("missing ad_account_id")
 	}
 
-	name, ok := args["name"].(string)
-	if !ok || name == "" {
-		return nil, fmt.Errorf("missing name")
+	result, err := metaRequest(
+		http.MethodGet,
+		fmt.Sprintf("/act_%s/campaigns", adAccountID),
+		ctx.AccessToken,
+		url.Values{
+			"fields": []string{"id,name,status,objective"},
+		},
+		nil,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	objective, ok := args["objective"].(string)
-	if !ok || objective == "" {
-		return nil, fmt.Errorf("missing objective")
+	return extractData(result), nil
+}
+
+// GetCampaign returns a single campaign with its configuration.
+func GetCampaign(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
+	}
+
+	return metaRequest(
+		http.MethodGet,
+		"/"+campaignID,
+		ctx.AccessToken,
+		url.Values{
+			"fields": []string{
+				"id,name,status,effective_status,objective,daily_budget,lifetime_budget,buying_type,start_time,stop_time,created_time,updated_time,special_ad_categories",
+			},
+		},
+		nil,
+	)
+}
+
+// CreateCampaign creates a new campaign for the connected ad account.
+func CreateCampaign(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adAccountID, ok := argString(args, "ad_account_id")
+	if !ok {
+		adAccountID = ctx.AdAccountID
+	}
+	if adAccountID == "" {
+		return nil, fmt.Errorf("missing ad_account_id")
+	}
+
+	name, err := requireString(args, "name")
+	if err != nil {
+		return nil, err
+	}
+
+	objective, err := requireString(args, "objective")
+	if err != nil {
+		return nil, err
 	}
 
 	body := map[string]any{
@@ -110,19 +228,19 @@ func CreateCampaign(
 		"status":    "PAUSED",
 	}
 
-	if status, ok := args["status"].(string); ok && status != "" {
+	if status, ok := argString(args, "status"); ok {
 		body["status"] = status
 	}
 
-	if buyingType, ok := args["buying_type"].(string); ok && buyingType != "" {
+	if buyingType, ok := argString(args, "buying_type"); ok {
 		body["buying_type"] = buyingType
 	}
 
-	if budget, ok := args["daily_budget"].(string); ok && budget != "" {
+	if budget, ok := argString(args, "daily_budget"); ok {
 		body["daily_budget"] = budget
 	}
 
-	if budget, ok := args["lifetime_budget"].(string); ok && budget != "" {
+	if budget, ok := argString(args, "lifetime_budget"); ok {
 		body["lifetime_budget"] = budget
 	}
 
@@ -130,18 +248,13 @@ func CreateCampaign(
 		body["special_ad_categories"] = categories
 	}
 
-	result, err := metaRequest(
+	return metaRequest(
 		http.MethodPost,
 		fmt.Sprintf("/act_%s/campaigns", adAccountID),
 		ctx.AccessToken,
 		nil,
 		body,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 // UpdateCampaign updates mutable fields on an existing campaign.
@@ -150,26 +263,26 @@ func UpdateCampaign(
 	args map[string]any,
 ) (any, error) {
 
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
 	}
 
 	body := map[string]any{}
 
-	if name, ok := args["name"].(string); ok && name != "" {
+	if name, ok := argString(args, "name"); ok {
 		body["name"] = name
 	}
 
-	if status, ok := args["status"].(string); ok && status != "" {
+	if status, ok := argString(args, "status"); ok {
 		body["status"] = status
 	}
 
-	if budget, ok := args["daily_budget"].(string); ok && budget != "" {
+	if budget, ok := argString(args, "daily_budget"); ok {
 		body["daily_budget"] = budget
 	}
 
-	if budget, ok := args["lifetime_budget"].(string); ok && budget != "" {
+	if budget, ok := argString(args, "lifetime_budget"); ok {
 		body["lifetime_budget"] = budget
 	}
 
@@ -177,18 +290,13 @@ func UpdateCampaign(
 		return nil, fmt.Errorf("no updatable fields provided")
 	}
 
-	result, err := metaRequest(
+	return metaRequest(
 		http.MethodPost,
 		"/"+campaignID,
 		ctx.AccessToken,
 		nil,
 		body,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 // DeleteCampaign permanently deletes a campaign.
@@ -197,93 +305,490 @@ func DeleteCampaign(
 	args map[string]any,
 ) (any, error) {
 
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
 	}
 
-	result, err := metaRequest(
+	return metaRequest(
 		http.MethodDelete,
 		"/"+campaignID,
 		ctx.AccessToken,
 		nil,
 		nil,
 	)
+}
+
+// ActivateCampaign activates a campaign.
+func ActivateCampaign(ctx ToolContext, args map[string]any) (any, error) {
+	campaignID, err := requireString(args, "campaign_id")
 	if err != nil {
 		return nil, err
 	}
-
-	return result, nil
+	return setEntityStatus(ctx, campaignID, "ACTIVE")
 }
 
-// GetAdSets lists ad sets that belong to a campaign.
-func GetAdSets(
+// PauseCampaign pauses a campaign.
+func PauseCampaign(ctx ToolContext, args map[string]any) (any, error) {
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
+	}
+	return setEntityStatus(ctx, campaignID, "PAUSED")
+}
+
+// ===========================
+// AD SETS
+// ===========================
+
+// ListAdSets lists ad sets that belong to a campaign.
+func ListAdSets(
 	ctx ToolContext,
 	args map[string]any,
 ) (any, error) {
 
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
-	}
-
-	query := url.Values{
-		"fields": []string{
-			"id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,bid_strategy,targeting,start_time,end_time",
-		},
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := metaRequest(
 		http.MethodGet,
 		fmt.Sprintf("/%s/adsets", campaignID),
 		ctx.AccessToken,
-		query,
+		url.Values{
+			"fields": []string{
+				"id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,bid_strategy,bid_amount,targeting,start_time,end_time,campaign_id",
+			},
+		},
 		nil,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if data, ok := result["data"].([]any); ok {
-		return data, nil
-	}
-
-	return result, nil
+	return extractData(result), nil
 }
 
-// GetAds lists ads that belong to an ad set.
-func GetAds(
+// GetAdSet returns a single ad set with its configuration.
+func GetAdSet(
 	ctx ToolContext,
 	args map[string]any,
 ) (any, error) {
 
-	adSetID, ok := args["ad_set_id"].(string)
-	if !ok || adSetID == "" {
-		return nil, fmt.Errorf("missing ad_set_id")
+	adSetID, err := requireString(args, "adset_id")
+	if err != nil {
+		return nil, err
 	}
 
-	query := url.Values{
-		"fields": []string{
-			"id,name,status,effective_status,configured_status,creative",
+	return metaRequest(
+		http.MethodGet,
+		"/"+adSetID,
+		ctx.AccessToken,
+		url.Values{
+			"fields": []string{
+				"id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,bid_strategy,bid_amount,targeting,start_time,end_time,campaign_id,created_time,updated_time",
+			},
 		},
+		nil,
+	)
+}
+
+// CreateAdSet creates a new ad set under a campaign.
+func CreateAdSet(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adAccountID, ok := argString(args, "ad_account_id")
+	if !ok {
+		adAccountID = ctx.AdAccountID
+	}
+	if adAccountID == "" {
+		return nil, fmt.Errorf("missing ad_account_id")
+	}
+
+	name, err := requireString(args, "name")
+	if err != nil {
+		return nil, err
+	}
+
+	campaignID, err := requireString(args, "campaign_id")
+	if err != nil {
+		return nil, err
+	}
+
+	optimizationGoal, err := requireString(args, "optimization_goal")
+	if err != nil {
+		return nil, err
+	}
+
+	billingEvent, err := requireString(args, "billing_event")
+	if err != nil {
+		return nil, err
+	}
+
+	dailyBudget, hasDaily := argString(args, "daily_budget")
+	lifetimeBudget, hasLifetime := argString(args, "lifetime_budget")
+
+	if !hasDaily && !hasLifetime {
+		return nil, fmt.Errorf("one of daily_budget or lifetime_budget is required")
+	}
+
+	body := map[string]any{
+		"name":              name,
+		"campaign_id":       campaignID,
+		"optimization_goal": optimizationGoal,
+		"billing_event":     billingEvent,
+		"status":            "PAUSED",
+	}
+
+	if hasDaily {
+		body["daily_budget"] = dailyBudget
+	}
+	if hasLifetime {
+		body["lifetime_budget"] = lifetimeBudget
+	}
+
+	if status, ok := argString(args, "status"); ok {
+		body["status"] = status
+	}
+
+	if bidStrategy, ok := argString(args, "bid_strategy"); ok {
+		body["bid_strategy"] = bidStrategy
+	}
+
+	if bidAmount, ok := argString(args, "bid_amount"); ok {
+		body["bid_amount"] = bidAmount
+	}
+
+	if targeting, ok := args["targeting"].(map[string]any); ok {
+		body["targeting"] = targeting
+	}
+
+	if startTime, ok := argString(args, "start_time"); ok {
+		body["start_time"] = startTime
+	}
+
+	if endTime, ok := argString(args, "end_time"); ok {
+		body["end_time"] = endTime
+	}
+
+	return metaRequest(
+		http.MethodPost,
+		fmt.Sprintf("/act_%s/adsets", adAccountID),
+		ctx.AccessToken,
+		nil,
+		body,
+	)
+}
+
+// UpdateAdSet updates mutable fields on an existing ad set.
+func UpdateAdSet(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adSetID, err := requireString(args, "adset_id")
+	if err != nil {
+		return nil, err
+	}
+
+	body := map[string]any{}
+
+	if name, ok := argString(args, "name"); ok {
+		body["name"] = name
+	}
+
+	if status, ok := argString(args, "status"); ok {
+		body["status"] = status
+	}
+
+	if budget, ok := argString(args, "daily_budget"); ok {
+		body["daily_budget"] = budget
+	}
+
+	if budget, ok := argString(args, "lifetime_budget"); ok {
+		body["lifetime_budget"] = budget
+	}
+
+	if bidAmount, ok := argString(args, "bid_amount"); ok {
+		body["bid_amount"] = bidAmount
+	}
+
+	if targeting, ok := args["targeting"].(map[string]any); ok {
+		body["targeting"] = targeting
+	}
+
+	if len(body) == 0 {
+		return nil, fmt.Errorf("no updatable fields provided")
+	}
+
+	return metaRequest(
+		http.MethodPost,
+		"/"+adSetID,
+		ctx.AccessToken,
+		nil,
+		body,
+	)
+}
+
+// DeleteAdSet permanently deletes an ad set.
+func DeleteAdSet(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adSetID, err := requireString(args, "adset_id")
+	if err != nil {
+		return nil, err
+	}
+
+	return metaRequest(
+		http.MethodDelete,
+		"/"+adSetID,
+		ctx.AccessToken,
+		nil,
+		nil,
+	)
+}
+
+// ActivateAdSet activates an ad set.
+func ActivateAdSet(ctx ToolContext, args map[string]any) (any, error) {
+	adSetID, err := requireString(args, "adset_id")
+	if err != nil {
+		return nil, err
+	}
+	return setEntityStatus(ctx, adSetID, "ACTIVE")
+}
+
+// PauseAdSet pauses an ad set.
+func PauseAdSet(ctx ToolContext, args map[string]any) (any, error) {
+	adSetID, err := requireString(args, "adset_id")
+	if err != nil {
+		return nil, err
+	}
+	return setEntityStatus(ctx, adSetID, "PAUSED")
+}
+
+// ===========================
+// ADS
+// ===========================
+
+// ListAds lists ads that belong to an ad set.
+func ListAds(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adSetID, err := requireString(args, "ad_set_id")
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := metaRequest(
 		http.MethodGet,
 		fmt.Sprintf("/%s/ads", adSetID),
 		ctx.AccessToken,
-		query,
+		url.Values{
+			"fields": []string{
+				"id,name,status,effective_status,configured_status,creative,adset_id,campaign_id",
+			},
+		},
 		nil,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	if data, ok := result["data"].([]any); ok {
-		return data, nil
+	return extractData(result), nil
+}
+
+// GetAd returns a single ad with its configuration.
+func GetAd(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
 	}
 
-	return result, nil
+	return metaRequest(
+		http.MethodGet,
+		"/"+adID,
+		ctx.AccessToken,
+		url.Values{
+			"fields": []string{
+				"id,name,status,effective_status,configured_status,creative,adset_id,campaign_id,created_time,updated_time",
+			},
+		},
+		nil,
+	)
+}
+
+// CreateAd creates a new ad under an ad set using an existing ad creative.
+func CreateAd(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adAccountID, ok := argString(args, "ad_account_id")
+	if !ok {
+		adAccountID = ctx.AdAccountID
+	}
+	if adAccountID == "" {
+		return nil, fmt.Errorf("missing ad_account_id")
+	}
+
+	name, err := requireString(args, "name")
+	if err != nil {
+		return nil, err
+	}
+
+	adSetID, err := requireString(args, "ad_set_id")
+	if err != nil {
+		return nil, err
+	}
+
+	creative, ok := args["creative"].(map[string]any)
+
+	if !ok {
+		creativeID, err := requireString(args, "creative_id")
+		if err != nil {
+			return nil, err
+		}
+		creative = map[string]any{"creative_id": creativeID}
+	}
+
+	body := map[string]any{
+		"name":     name,
+		"adset_id": adSetID,
+		"creative": creative,
+		"status":   "PAUSED",
+	}
+
+	if status, ok := argString(args, "status"); ok {
+		body["status"] = status
+	}
+
+	return metaRequest(
+		http.MethodPost,
+		fmt.Sprintf("/act_%s/ads", adAccountID),
+		ctx.AccessToken,
+		nil,
+		body,
+	)
+}
+
+// UpdateAd updates mutable fields on an existing ad.
+func UpdateAd(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
+	}
+
+	body := map[string]any{}
+
+	if name, ok := argString(args, "name"); ok {
+		body["name"] = name
+	}
+
+	if status, ok := argString(args, "status"); ok {
+		body["status"] = status
+	}
+
+	if creative, ok := args["creative"].(map[string]any); ok {
+		body["creative"] = creative
+	}
+
+	if len(body) == 0 {
+		return nil, fmt.Errorf("no updatable fields provided")
+	}
+
+	return metaRequest(
+		http.MethodPost,
+		"/"+adID,
+		ctx.AccessToken,
+		nil,
+		body,
+	)
+}
+
+// DeleteAd permanently deletes an ad.
+func DeleteAd(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
+	}
+
+	return metaRequest(
+		http.MethodDelete,
+		"/"+adID,
+		ctx.AccessToken,
+		nil,
+		nil,
+	)
+}
+
+// ActivateAd activates an ad.
+func ActivateAd(ctx ToolContext, args map[string]any) (any, error) {
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
+	}
+	return setEntityStatus(ctx, adID, "ACTIVE")
+}
+
+// PauseAd pauses an ad.
+func PauseAd(ctx ToolContext, args map[string]any) (any, error) {
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
+	}
+	return setEntityStatus(ctx, adID, "PAUSED")
+}
+
+// ===========================
+// INSIGHTS
+// ===========================
+
+const insightFields = "spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,actions,cost_per_action_type,purchase_roas,date_start,date_stop"
+
+func fetchInsights(
+	ctx ToolContext,
+	objectID string,
+	datePreset string,
+) (any, error) {
+
+	if datePreset == "" {
+		datePreset = "last_30d"
+	}
+
+	result, err := metaRequest(
+		http.MethodGet,
+		fmt.Sprintf("/%s/insights", objectID),
+		ctx.AccessToken,
+		url.Values{
+			"fields":      []string{insightFields},
+			"date_preset": []string{datePreset},
+		},
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractData(result), nil
 }
 
 // GetCampaignInsights returns performance metrics for a campaign.
@@ -292,75 +797,90 @@ func GetCampaignInsights(
 	args map[string]any,
 ) (any, error) {
 
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
-	}
-
-	datePreset := "last_30d"
-	if preset, ok := args["date_preset"].(string); ok && preset != "" {
-		datePreset = preset
-	}
-
-	query := url.Values{
-		"fields": []string{
-			"spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,actions,cost_per_action_type,purchase_roas,date_start,date_stop",
-		},
-		"date_preset": []string{datePreset},
-	}
-
-	result, err := metaRequest(
-		http.MethodGet,
-		fmt.Sprintf("/%s/insights", campaignID),
-		ctx.AccessToken,
-		query,
-		nil,
-	)
+	campaignID, err := requireString(args, "campaign_id")
 	if err != nil {
 		return nil, err
 	}
 
-	if data, ok := result["data"].([]any); ok {
-		return data, nil
-	}
+	datePreset, _ := argString(args, "date_preset")
 
-	return result, nil
+	return fetchInsights(ctx, campaignID, datePreset)
 }
 
-// UpdateCampaignStatus pauses or activates a campaign.
-func UpdateCampaignStatus(
+// GetAdSetInsights returns performance metrics for an ad set.
+func GetAdSetInsights(
 	ctx ToolContext,
 	args map[string]any,
 ) (any, error) {
 
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
-	}
-
-	status, ok := args["status"].(string)
-	if !ok || status == "" {
-		return nil, fmt.Errorf("missing status (ACTIVE, PAUSED or ARCHIVED)")
-	}
-
-	status = strings.ToUpper(status)
-
-	switch status {
-	case "ACTIVE", "PAUSED", "ARCHIVED":
-	default:
-		return nil, fmt.Errorf("invalid status %q, must be ACTIVE, PAUSED or ARCHIVED", status)
-	}
-
-	result, err := metaRequest(
-		http.MethodPost,
-		"/"+campaignID,
-		ctx.AccessToken,
-		nil,
-		map[string]any{"status": status},
-	)
+	adSetID, err := requireString(args, "adset_id")
 	if err != nil {
 		return nil, err
 	}
 
-	return result, nil
+	datePreset, _ := argString(args, "date_preset")
+
+	return fetchInsights(ctx, adSetID, datePreset)
+}
+
+// GetAdInsights returns performance metrics for an ad.
+func GetAdInsights(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	adID, err := requireString(args, "ad_id")
+	if err != nil {
+		return nil, err
+	}
+
+	datePreset, _ := argString(args, "date_preset")
+
+	return fetchInsights(ctx, adID, datePreset)
+}
+
+// CompareCampaigns fetches insights for several campaigns so the model
+// can compare their performance side by side.
+func CompareCampaigns(
+	ctx ToolContext,
+	args map[string]any,
+) (any, error) {
+
+	raw, ok := args["campaign_ids"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil, fmt.Errorf("missing campaign_ids")
+	}
+
+	const maxIDs = 10
+	if len(raw) > maxIDs {
+		return nil, fmt.Errorf("too many campaign_ids (%d), maximum is %d", len(raw), maxIDs)
+	}
+
+	datePreset, _ := argString(args, "date_preset")
+
+	comparisons := make([]map[string]any, 0, len(raw))
+
+	for _, v := range raw {
+		id, ok := v.(string)
+		if !ok || id == "" {
+			continue
+		}
+
+		entry := map[string]any{"campaign_id": id}
+
+		insights, err := fetchInsights(ctx, id, datePreset)
+		if err != nil {
+			entry["error"] = err.Error()
+		} else {
+			entry["insights"] = insights
+		}
+
+		comparisons = append(comparisons, entry)
+	}
+
+	if len(comparisons) == 0 {
+		return nil, fmt.Errorf("no valid campaign_ids provided")
+	}
+
+	return comparisons, nil
 }

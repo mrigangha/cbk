@@ -85,7 +85,9 @@ func NewApi() *Api {
 		})
 	})
 
-	r.With(AuthMiddleware).Post("/test", api.RunAgent)
+	r.With(AuthMiddleware).Post("/agent/chat", api.RunAgentChat)
+	// Deprecated alias kept for older clients.
+	r.With(AuthMiddleware).Post("/test", api.RunAgentChat)
 
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware)
@@ -94,6 +96,19 @@ func NewApi() *Api {
 		r.Post("/agent/sessions", api.CreateAgentSession)
 		r.Get("/agent/sessions/{sessionID}/messages", api.GetAgentSessionMessages)
 		r.Delete("/agent/sessions/{sessionID}", api.DeleteAgentSession)
+	})
+
+	r.Route("/goals", func(r chi.Router) {
+		r.Use(AuthMiddleware)
+
+		r.Post("/", api.CreateGoal)
+		r.Get("/", api.ListGoals)
+		r.Get("/{goalID}", api.GetGoal)
+		r.Patch("/{goalID}", api.UpdateGoal)
+		r.Delete("/{goalID}", api.DeleteGoal)
+		r.Post("/{goalID}/pause", api.PauseGoal)
+		r.Post("/{goalID}/activate", api.ActivateGoal)
+		r.Post("/{goalID}/complete", api.CompleteGoal)
 	})
 	r.Post("/auth/meta/callback", api.MetaCallback)
 	r.Get("/auth/meta/credential", api.GetMetaCredential)

@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-
-	"github.com/mrigangha/cbk/internals/tools"
 )
 
 type AdSetResponse struct {
@@ -228,19 +226,18 @@ type TokenResponse struct {
 }
 type MetaCredential struct {
 	AppID       string `json:"app_id"`
-	AppSecret   string `json:"app_secret"`
 	CallbackURL string `json:"callback_url"`
 }
 
 func (a *Api) GetMetaCredential(w http.ResponseWriter, r *http.Request) {
 	var (
 		appID       = os.Getenv("META_APP_ID")
-		appSecret   = os.Getenv("META_APP_SECRET")
 		callbackURL = os.Getenv("META_CALLBACK_URL")
 	)
+
+	// The app secret must never leave the server.
 	cred := MetaCredential{
 		AppID:       appID,
-		AppSecret:   appSecret,
 		CallbackURL: callbackURL,
 	}
 	json.NewEncoder(w).Encode(cred)
@@ -351,7 +348,10 @@ type ConnectedMetaAccount struct {
 	Currency       string `json:"currency"`
 	TimezoneName   string `json:"timezone_name"`
 	TokenExpiresAt string `json:"token_expires_at,omitempty"`
-	AccessToken    string `json:"access_token"`
+
+	// AccessToken is loaded from the database for internal use only
+	// and must never be serialized to API responses.
+	AccessToken string `json:"-"`
 }
 
 func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +411,14 @@ func (a *Api) GetCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var campaigns tools.CampaignResponse
+	var campaigns struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Status    string `json:"status"`
+			Objective string `json:"objective"`
+		} `json:"data"`
+	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&campaigns); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -442,7 +449,7 @@ func (a *Api) GetConnectedMetaAccounts(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			id,
 			ad_account_id,
-			business_id,
+			COALESCE(business_id, ''),
 			account_name,
 			currency,
 			timezone_name,

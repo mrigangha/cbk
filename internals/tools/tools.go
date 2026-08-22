@@ -1,10 +1,7 @@
 package tools
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 )
 
 type Tool struct {
@@ -28,19 +25,28 @@ func NewToolHandler() *ToolHandler {
 		tools: make(map[string]Tool),
 	}
 
+	// ===========================
+	// CAMPAIGNS
+	// ===========================
+
 	h.RegisterTool(Tool{
-		Name:        "get_campaigns",
+		Name:        "list_campaigns",
 		Description: "Returns all campaigns for the connected Meta Ads account.",
 		Parameters: map[string]any{
-			"type":       "OBJECT",
-			"properties": map[string]any{},
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_account_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ad account ID. Defaults to the connected account.",
+				},
+			},
 		},
-		Handler: GetCampaigns,
+		Handler: ListCampaigns,
 	})
 
 	h.RegisterTool(Tool{
-		Name:        "get_campaign_details",
-		Description: "Returns performance metrics for a Meta Ads campaign.",
+		Name:        "get_campaign",
+		Description: "Returns a single campaign with its configuration (status, objective, budgets, special ad categories).",
 		Parameters: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
@@ -51,7 +57,7 @@ func NewToolHandler() *ToolHandler {
 			},
 			"required": []string{"campaign_id"},
 		},
-		Handler: CampaignInsights,
+		Handler: GetCampaign,
 	})
 
 	h.RegisterTool(Tool{
@@ -134,26 +140,6 @@ func NewToolHandler() *ToolHandler {
 	})
 
 	h.RegisterTool(Tool{
-		Name:        "update_campaign_status",
-		Description: "Pauses or activates a campaign by setting its status to ACTIVE, PAUSED or ARCHIVED.",
-		Parameters: map[string]any{
-			"type": "OBJECT",
-			"properties": map[string]any{
-				"campaign_id": map[string]any{
-					"type":        "STRING",
-					"description": "The ID of the campaign.",
-				},
-				"status": map[string]any{
-					"type":        "STRING",
-					"description": "ACTIVE, PAUSED or ARCHIVED.",
-				},
-			},
-			"required": []string{"campaign_id", "status"},
-		},
-		Handler: UpdateCampaignStatus,
-	})
-
-	h.RegisterTool(Tool{
 		Name:        "delete_campaign",
 		Description: "Permanently deletes a campaign. Use with caution.",
 		Parameters: map[string]any{
@@ -170,8 +156,8 @@ func NewToolHandler() *ToolHandler {
 	})
 
 	h.RegisterTool(Tool{
-		Name:        "get_adsets",
-		Description: "Returns all ad sets for a campaign.",
+		Name:        "activate_campaign",
+		Description: "Activates a campaign so it can spend and deliver.",
 		Parameters: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
@@ -182,12 +168,220 @@ func NewToolHandler() *ToolHandler {
 			},
 			"required": []string{"campaign_id"},
 		},
-		Handler: GetAdSets,
+		Handler: ActivateCampaign,
 	})
 
 	h.RegisterTool(Tool{
-		Name:        "get_ads",
-		Description: "Returns all ads for an ad set.",
+		Name:        "pause_campaign",
+		Description: "Pauses a campaign to stop it from spending.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"campaign_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the campaign.",
+				},
+			},
+			"required": []string{"campaign_id"},
+		},
+		Handler: PauseCampaign,
+	})
+
+	// ===========================
+	// AD SETS
+	// ===========================
+
+	h.RegisterTool(Tool{
+		Name:        "list_adsets",
+		Description: "Returns all ad sets that belong to a campaign.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"campaign_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the campaign.",
+				},
+			},
+			"required": []string{"campaign_id"},
+		},
+		Handler: ListAdSets,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "get_adset",
+		Description: "Returns a single ad set with its configuration (budgets, optimization goal, targeting, schedule).",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: GetAdSet,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "create_adset",
+		Description: "Creates a new ad set under a campaign. Requires name, campaign_id, optimization_goal (e.g. REACH, LINK_CLICKS, OFFSITE_CONVERSIONS), billing_event (IMPRESSIONS, LINK_CLICKS) and one of daily_budget or lifetime_budget in minor units. Targeting is an object like {\"geo_locations\":{\"countries\":[\"US\"]},\"age_min\":18}.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_account_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ad account ID. Defaults to the connected account.",
+				},
+				"name": map[string]any{
+					"type":        "STRING",
+					"description": "The name of the ad set.",
+				},
+				"campaign_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the parent campaign.",
+				},
+				"status": map[string]any{
+					"type":        "STRING",
+					"description": "ACTIVE or PAUSED. Defaults to PAUSED.",
+				},
+				"daily_budget": map[string]any{
+					"type":        "STRING",
+					"description": "Daily budget in minor units. Required unless lifetime_budget is set.",
+				},
+				"lifetime_budget": map[string]any{
+					"type":        "STRING",
+					"description": "Lifetime budget in minor units. Required unless daily_budget is set.",
+				},
+				"optimization_goal": map[string]any{
+					"type":        "STRING",
+					"description": "e.g. REACH, IMPRESSIONS, LINK_CLICKS, POST_ENGAGEMENT, OFFSITE_CONVERSIONS, VALUE.",
+				},
+				"billing_event": map[string]any{
+					"type":        "STRING",
+					"description": "IMPRESSIONS or LINK_CLICKS (must align with optimization_goal).",
+				},
+				"bid_strategy": map[string]any{
+					"type":        "STRING",
+					"description": "e.g. LOWEST_COST_WITHOUT_CAP, COST_CAP, LOWEST_COST_WITH_MIN_ROAS.",
+				},
+				"bid_amount": map[string]any{
+					"type":        "STRING",
+					"description": "Bid amount in minor units when using a capped bid strategy.",
+				},
+				"targeting": map[string]any{
+					"type":        "OBJECT",
+					"description": "Targeting spec object, e.g. {\"geo_locations\":{\"countries\":[\"US\"]},\"age_min\":18}.",
+				},
+				"start_time": map[string]any{
+					"type":        "STRING",
+					"description": "Start time ISO 8601, e.g. 2026-09-01T00:00:00-0700.",
+				},
+				"end_time": map[string]any{
+					"type":        "STRING",
+					"description": "End time ISO 8601.",
+				},
+			},
+			"required": []string{"name", "campaign_id", "optimization_goal", "billing_event"},
+		},
+		Handler: CreateAdSet,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "update_adset",
+		Description: "Updates mutable fields (name, status, budgets, bid_amount, targeting) on an existing ad set.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set to update.",
+				},
+				"name": map[string]any{
+					"type":        "STRING",
+					"description": "New ad set name.",
+				},
+				"status": map[string]any{
+					"type":        "STRING",
+					"description": "New status: ACTIVE or PAUSED.",
+				},
+				"daily_budget": map[string]any{
+					"type":        "STRING",
+					"description": "New daily budget in minor units.",
+				},
+				"lifetime_budget": map[string]any{
+					"type":        "STRING",
+					"description": "New lifetime budget in minor units.",
+				},
+				"bid_amount": map[string]any{
+					"type":        "STRING",
+					"description": "New bid amount in minor units.",
+				},
+				"targeting": map[string]any{
+					"type":        "OBJECT",
+					"description": "Replacement targeting spec object.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: UpdateAdSet,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "delete_adset",
+		Description: "Permanently deletes an ad set. Use with caution.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set to delete.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: DeleteAdSet,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "activate_adset",
+		Description: "Activates an ad set so it can spend and deliver.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: ActivateAdSet,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "pause_adset",
+		Description: "Pauses an ad set to stop it from spending.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: PauseAdSet,
+	})
+
+	// ===========================
+	// ADS
+	// ===========================
+
+	h.RegisterTool(Tool{
+		Name:        "list_ads",
+		Description: "Returns all ads that belong to an ad set.",
 		Parameters: map[string]any{
 			"type": "OBJECT",
 			"properties": map[string]any{
@@ -198,8 +392,132 @@ func NewToolHandler() *ToolHandler {
 			},
 			"required": []string{"ad_set_id"},
 		},
-		Handler: GetAds,
+		Handler: ListAds,
 	})
+
+	h.RegisterTool(Tool{
+		Name:        "get_ad",
+		Description: "Returns a single ad with its configuration and creative reference.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: GetAd,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "create_ad",
+		Description: "Creates a new ad under an ad set using an existing creative. Requires name, ad_set_id and creative_id.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_account_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ad account ID. Defaults to the connected account.",
+				},
+				"name": map[string]any{
+					"type":        "STRING",
+					"description": "The name of the ad.",
+				},
+				"ad_set_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the parent ad set.",
+				},
+				"creative_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of an existing ad creative to use.",
+				},
+				"status": map[string]any{
+					"type":        "STRING",
+					"description": "ACTIVE or PAUSED. Defaults to PAUSED.",
+				},
+			},
+			"required": []string{"name", "ad_set_id", "creative_id"},
+		},
+		Handler: CreateAd,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "update_ad",
+		Description: "Updates mutable fields (name, status) on an existing ad.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad to update.",
+				},
+				"name": map[string]any{
+					"type":        "STRING",
+					"description": "New ad name.",
+				},
+				"status": map[string]any{
+					"type":        "STRING",
+					"description": "New status: ACTIVE or PAUSED.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: UpdateAd,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "delete_ad",
+		Description: "Permanently deletes an ad. Use with caution.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad to delete.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: DeleteAd,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "activate_ad",
+		Description: "Activates an ad so it can spend and deliver.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: ActivateAd,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "pause_ad",
+		Description: "Pauses an ad to stop it from spending.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: PauseAd,
+	})
+
+	// ===========================
+	// INSIGHTS
+	// ===========================
 
 	h.RegisterTool(Tool{
 		Name:        "get_campaign_insights",
@@ -219,6 +537,69 @@ func NewToolHandler() *ToolHandler {
 			"required": []string{"campaign_id"},
 		},
 		Handler: GetCampaignInsights,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "get_adset_insights",
+		Description: "Returns performance metrics (spend, impressions, clicks, ctr, actions, roas) for an ad set.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"adset_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad set.",
+				},
+				"date_preset": map[string]any{
+					"type":        "STRING",
+					"description": "Date range preset, e.g. today, yesterday, last_7d, last_30d, this_month, last_month. Defaults to last_30d.",
+				},
+			},
+			"required": []string{"adset_id"},
+		},
+		Handler: GetAdSetInsights,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "get_ad_insights",
+		Description: "Returns performance metrics (spend, impressions, clicks, ctr, actions, roas) for a single ad.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"ad_id": map[string]any{
+					"type":        "STRING",
+					"description": "The ID of the ad.",
+				},
+				"date_preset": map[string]any{
+					"type":        "STRING",
+					"description": "Date range preset, e.g. today, yesterday, last_7d, last_30d, this_month, last_month. Defaults to last_30d.",
+				},
+			},
+			"required": []string{"ad_id"},
+		},
+		Handler: GetAdInsights,
+	})
+
+	h.RegisterTool(Tool{
+		Name:        "compare_campaigns",
+		Description: "Fetches insights for up to 10 campaigns at once so their performance can be compared side by side.",
+		Parameters: map[string]any{
+			"type": "OBJECT",
+			"properties": map[string]any{
+				"campaign_ids": map[string]any{
+					"type":        "ARRAY",
+					"description": "The IDs of the campaigns to compare (max 10).",
+					"items": map[string]any{
+						"type": "STRING",
+					},
+				},
+				"date_preset": map[string]any{
+					"type":        "STRING",
+					"description": "Date range preset, e.g. today, yesterday, last_7d, last_30d, this_month, last_month. Defaults to last_30d.",
+				},
+			},
+			"required": []string{"campaign_ids"},
+		},
+		Handler: CompareCampaigns,
 	})
 
 	return h
@@ -256,118 +637,14 @@ func (h *ToolHandler) GetTools() []Tool {
 	return list
 }
 
-type CampaignResponse struct {
-	Data []Campaign `json:"data"`
-}
-
-type Campaign struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-}
-
-func GetCampaigns(
-	ctx ToolContext,
-	args map[string]any,
-) (any, error) {
-	adAccountID, ok := args["ad_account_id"].(string)
-	if !ok {
-		adAccountID = ctx.AdAccountID
-	}
-	if adAccountID == "" {
-		return nil, fmt.Errorf("missing ad_account_id")
-	}
-
-	url := fmt.Sprintf(
-		"https://graph.facebook.com/v23.0/act_%s/campaigns?fields=id,name,status,objective",
-		adAccountID,
-	)
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set(
-		"Authorization",
-		"Bearer "+ctx.AccessToken,
-	)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf(
-			"meta error (%d): %s",
-			resp.StatusCode,
-			string(body),
-		)
-	}
-
-	var campaigns CampaignResponse
-
-	if err := json.NewDecoder(resp.Body).Decode(&campaigns); err != nil {
-		return nil, err
-	}
-
-	return campaigns.Data, nil
-}
-
-func CampaignInsights(ctx ToolContext,
-	args map[string]any,
-) (any, error) {
-
-	campaignID, ok := args["campaign_id"].(string)
-	if !ok || campaignID == "" {
-		return nil, fmt.Errorf("missing campaign_id")
-	}
-
-	var accessToken string = ctx.AccessToken
-
-	graphURL := fmt.Sprintf(
-		"https://graph.facebook.com/v23.0/%s?fields=id,name,status,objective,daily_budget,lifetime_budget,created_time,updated_time,special_ad_categories",
-		campaignID,
-	)
-
-	req, err := http.NewRequest(http.MethodGet, graphURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
+// ===========================
+// GEMINI SCHEMA TYPES
+// ===========================
 
 type GenerateContentRequest struct {
-	Contents []Content    `json:"contents"`
-	Tools    []GeminiTool `json:"tools,omitempty"`
+	SystemInstruction *Content    `json:"systemInstruction,omitempty"`
+	Contents          []Content   `json:"contents"`
+	Tools             []GeminiTool `json:"tools,omitempty"`
 }
 
 type Message struct {
@@ -446,6 +723,83 @@ type UsageMetadata struct {
 	ThoughtsTokenCount   int `json:"thoughtsTokenCount,omitempty"`
 }
 
+// DeclarationFor converts a Tool into its Gemini function declaration schema.
+func DeclarationFor(tool Tool) FunctionDeclaration {
+
+	properties := make(map[string]PropertySchema)
+
+	if props, ok := tool.Parameters["properties"].(map[string]any); ok {
+
+		for name, value := range props {
+
+			propMap, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			property := PropertySchema{}
+
+			if t, ok := propMap["type"].(string); ok {
+				property.Type = t
+			}
+
+			if d, ok := propMap["description"].(string); ok {
+				property.Description = d
+			}
+
+			// Array item type (e.g. special_ad_categories)
+			if itemMap, ok := propMap["items"].(map[string]any); ok {
+				items := &PropertySchema{}
+
+				if t, ok := itemMap["type"].(string); ok {
+					items.Type = t
+				}
+
+				if d, ok := itemMap["description"].(string); ok {
+					items.Description = d
+				}
+
+				property.Items = items
+			}
+
+			properties[name] = property
+		}
+	}
+
+	// Required fields
+	required := []string{}
+
+	switch req := tool.Parameters["required"].(type) {
+
+	case []string:
+		required = req
+
+	case []any:
+		for _, v := range req {
+			if s, ok := v.(string); ok {
+				required = append(required, s)
+			}
+		}
+	}
+
+	// Parameter type
+	paramType := "OBJECT"
+
+	if t, ok := tool.Parameters["type"].(string); ok {
+		paramType = t
+	}
+
+	return FunctionDeclaration{
+		Name:        tool.Name,
+		Description: tool.Description,
+		Parameters: ParameterSchema{
+			Type:       paramType,
+			Properties: properties,
+			Required:   required,
+		},
+	}
+}
+
 func ContentRequest(
 	h *ToolHandler,
 	history []Message,
@@ -454,80 +808,7 @@ func ContentRequest(
 	declarations := make([]FunctionDeclaration, 0)
 
 	for _, tool := range h.GetTools() {
-
-		properties := make(map[string]PropertySchema)
-
-		// Properties
-		if props, ok := tool.Parameters["properties"].(map[string]any); ok {
-
-			for name, value := range props {
-
-				propMap, ok := value.(map[string]any)
-				if !ok {
-					continue
-				}
-
-				property := PropertySchema{}
-
-				if t, ok := propMap["type"].(string); ok {
-					property.Type = t
-				}
-
-				if d, ok := propMap["description"].(string); ok {
-					property.Description = d
-				}
-
-				// Array item type (e.g. special_ad_categories)
-				if itemMap, ok := propMap["items"].(map[string]any); ok {
-					items := &PropertySchema{}
-
-					if t, ok := itemMap["type"].(string); ok {
-						items.Type = t
-					}
-
-					if d, ok := itemMap["description"].(string); ok {
-						items.Description = d
-					}
-
-					property.Items = items
-				}
-
-				properties[name] = property
-			}
-		}
-
-		// Required fields
-		required := []string{}
-
-		switch req := tool.Parameters["required"].(type) {
-
-		case []string:
-			required = req
-
-		case []any:
-			for _, v := range req {
-				if s, ok := v.(string); ok {
-					required = append(required, s)
-				}
-			}
-		}
-
-		// Parameter type
-		paramType := "OBJECT"
-
-		if t, ok := tool.Parameters["type"].(string); ok {
-			paramType = t
-		}
-
-		declarations = append(declarations, FunctionDeclaration{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters: ParameterSchema{
-				Type:       paramType,
-				Properties: properties,
-				Required:   required,
-			},
-		})
+		declarations = append(declarations, DeclarationFor(tool))
 	}
 
 	contents := make([]Content, 0, len(history)+1)
