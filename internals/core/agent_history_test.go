@@ -19,6 +19,7 @@ func agentSessionsRouter(a *Api) http.Handler {
 	r := chi.NewRouter()
 	r.With(AuthMiddleware).Get("/agent/sessions", a.ListAgentSessions)
 	r.With(AuthMiddleware).Patch("/agent/sessions/{sessionID}", a.UpdateAgentSession)
+	r.With(AuthMiddleware).Get("/agent/sessions/{sessionID}/messages", a.GetAgentSessionMessages)
 	return r
 }
 
@@ -218,8 +219,90 @@ func TestAgentSessions_RenameAndRelink(t *testing.T) {
 	}
 }
 
-func TestAgentSessions_OwnershipEnforced(t *testing.T) {
+// Restoring an old chat must return the FULL run: tool calls with args,
+// results, and the reasoning trace — not just the text answers.
+func TestAgentSessionMessages_StepsAndTraceRoundTrip(t *testing.T) {
 
+	a, uid := newExecTestApi(t)
+
+	sessionID := seedChat(t, a, uid, "Run history", nil, 1)
+
+	steps := `[
+		{"tool":"list_campaigns","args":{"ad_account_id":"777"},
+		 "result":{"data":[{"id":"111"}]}}
+	]`
+	trace := `[
+		{"iteration":1,"thought":"Need the campaign list first.",
+		 "actions":[{"tool":"list_campaigns","args":{"ad_account_id":"777"}}],
+		 "observations":[{"tool":"list_campaigns","result":{"data":[]}}],
+		 "decision":{"type":"act","reasoning":"fetch details next"}}
+	]`
+
+	a.db.Exec(`
+		INSERT INTO agent_messages (session_id, role, content, steps, trace, model_name)
+		VALUES (?, 'assistant', 'Here is what I found.', ?, ?, 'gemini-2.0-flash')
+	`, sessionID, steps, trace)
+
+	router := agentSessionsRouter(a)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, histReq(t, a, uid,
+		http.MethodGet, fmt.Sprintf("/agent/sessions/%d/messages", sessionID),
+		nil))
+	if rec.Code != 200 {
+		t.Fatalf("messages returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Messages []struct {
+			Role      string `json:"role"`
+			Content   string `json:"content"`
+			ModelName string `json:"model_name"`
+			Steps     []struct {
+				Tool   string         `json:"tool"`
+				Args   map[string]any `json:"args"`
+				Result any            `json:"result"`
+			} `json:"steps"`
+			Trace []struct {
+				Iteration int    `json:"iteration"`
+				Thought   string `json:"thought"`
+				Decision  struct {
+					Type string `json:"type"`
+				} `json:"decision"`
+			} `json:"trace"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("bad body: %s", rec.Body.String())
+	}
+
+	if len(payload.Messages) != 2 {
+		t.Fatalf("got %d messages, want 2", len(payload.Messages))
+	}
+
+	asstIdx := -1
+	for i := range payload.Messages {
+		if payload.Messages[i].Role == "assistant" {
+			asstIdx = i
+		}
+	}
+	if asstIdx < 0 {
+		t.Fatal("no assistant message returned")
+	}
+	asst := &payload.Messages[asstIdx]
+
+	if len(asst.Steps) != 1 || asst.Steps[0].Tool != "list_campaigns" {
+		t.Errorf("steps = %+v, want list_campaigns with args", asst.Steps)
+	}
+	if len(asst.Trace) != 1 || asst.Trace[0].Thought == "" ||
+		asst.Trace[0].Decision.Type != "act" {
+		t.Errorf("trace = %+v, want thought + decision", asst.Trace)
+	}
+	if asst.ModelName != "gemini-2.0-flash" {
+		t.Errorf("model_name = %q", asst.ModelName)
+	}
+}
+
+func TestAgentSessions_OwnershipEnforced(t *testing.T) {
 	a, uidA := newExecTestApi(t)
 
 	// Second user owns the target session.

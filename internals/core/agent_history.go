@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mrigangha/cbk/internals/agent"
 )
 
 type AgentSession struct {
@@ -21,13 +22,13 @@ type AgentSession struct {
 }
 
 type StoredAgentMessage struct {
-	ID        int64           `json:"id"`
-	Role      string          `json:"role"`
-	Content   string          `json:"content"`
-	Steps     []AgentStep     `json:"steps,omitempty"`
-	ModelName string          `json:"model_name,omitempty"`
-	CreatedAt string          `json:"created_at"`
-	RawSteps  json.RawMessage `json:"-"`
+	ID        int64              `json:"id"`
+	Role      string             `json:"role"`
+	Content   string             `json:"content"`
+	Steps     []AgentStep        `json:"steps,omitempty"`
+	Trace     []agent.TraceEntry `json:"trace,omitempty"`
+	ModelName string             `json:"model_name,omitempty"`
+	CreatedAt string             `json:"created_at"`
 }
 
 func (a *Api) ListAgentSessions(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +154,9 @@ func (a *Api) GetAgentSessionMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := a.db.Query(`
-		SELECT id, role, content, COALESCE(steps, '[]'), COALESCE(model_name, ''), created_at
+		SELECT id, role, content,
+		       COALESCE(steps, '[]'), COALESCE(trace, ''),
+		       COALESCE(model_name, ''), created_at
 		FROM agent_messages
 		WHERE session_id = ?
 		ORDER BY id ASC
@@ -169,11 +172,16 @@ func (a *Api) GetAgentSessionMessages(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m StoredAgentMessage
 
+		// Scan into plain []byte: drivers hand TEXT back as string,
+		// which json.RawMessage cannot absorb directly.
+		var rawSteps, rawTrace []byte
+
 		if err := rows.Scan(
 			&m.ID,
 			&m.Role,
 			&m.Content,
-			&m.RawSteps,
+			&rawSteps,
+			&rawTrace,
 			&m.ModelName,
 			&m.CreatedAt,
 		); err != nil {
@@ -181,8 +189,11 @@ func (a *Api) GetAgentSessionMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if len(m.RawSteps) > 0 {
-			json.Unmarshal(m.RawSteps, &m.Steps)
+		if len(rawSteps) > 0 {
+			json.Unmarshal(rawSteps, &m.Steps)
+		}
+		if len(rawTrace) > 0 {
+			json.Unmarshal(rawTrace, &m.Trace)
 		}
 
 		messages = append(messages, m)
